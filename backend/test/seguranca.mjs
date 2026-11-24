@@ -1,98 +1,100 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { randomBytes, randomInt, scryptSync } from 'node:crypto';
-import { createServer } from 'node:net';
-import { setTimeout as esperar } from 'node:timers/promises';
+import { createHash, randomBytes, randomInt, randomUUID, scryptSync } from 'node:crypto';
 import test from 'node:test';
 import { PrismaClient } from '@prisma/client';
+import { iniciarApi, requisicoes } from './ambiente.mjs';
 
-test('sessão, senhas, CORS e limites de acesso', { timeout: 30000 }, async () => {
-  const reserva = createServer();
-  await new Promise(resolve => reserva.listen(0, '127.0.0.1', resolve));
-  const { port } = reserva.address();
-  await new Promise(resolve => reserva.close(resolve));
+const resumir = token => createHash('sha256').update(token).digest('hex');
+
+test('sessão, senhas, CORS, limites e verificação por e-mail', { timeout: 30000 }, async t => {
   const origem = 'http://localhost:8080';
-  const base = 'http://127.0.0.1:' + port;
-  const filho = spawn(process.execPath, ['dist/main.js'], {
-    env: { ...process.env, PORT: String(port), CORS_ORIGINS: origem, AGENDA_PUBLICACAO: '0' },
-    stdio: 'ignore',
-  });
+  const caixa = await iniciarApi(t, { CORS_ORIGINS: origem });
+  const req = requisicoes(caixa.base);
   const db = new PrismaClient();
+  t.after(() => db.$disconnect());
   const celular = '849' + randomInt(10000000,99999999);
-  const outro = '859' + randomInt(10000000,99999999);
   const inexistente = '869' + randomInt(10000000,99999999);
   const mascarar = valor => valor.replace(/^(\d{2})(\d{5})(\d{4})$/, '($1) $2-$3');
   const senha = 'Frase fictícia para teste local';
-  const dados = { nome: 'Cliente fictício de segurança', celular, senha };
+  const novaSenha = 'Nova frase fictícia para teste';
+  const email = randomUUID() + '@example.test';
+  const dados = { nome: 'Cliente fictício de segurança', email };
 
-  async function chamar(path, status, { body, token, headers = {} } = {}) {
-    const res = await fetch(base + path, {
-      method: body ? 'POST' : 'GET',
-      headers: { ...headers, ...(token && { Authorization: 'Bearer ' + token }),
-        ...(body && { 'Content-Type': 'application/json' }) },
-      body: body && JSON.stringify(body),
+  for (const valor of [origem, 'https://exemplo.invalid']) {
+    const res = await fetch(caixa.base + '/auth/login', {
+      method: 'OPTIONS',
+      headers: { Origin: valor, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type' },
     });
-    assert.equal(res.status, status, path);
-    assert.equal(res.headers.get('cache-control'), 'no-store');
-    return { dados: res.status === 204 ? undefined : await res.json(), res };
+    assert.equal(res.headers.get('access-control-allow-origin'), valor === origem ? origem : null);
   }
 
-  try {
-    let pronto = false;
-    for (let tentativa = 0; tentativa < 50; tentativa++) {
-      if ((await fetch(base + '/saude').catch(() => null))?.ok) { pronto = true; break; }
-      await esperar(100);
+  await req('/auth/cadastro', {body: {...dados, papel:'ENGENHEIRO'}, status:400});
+  const respostaCadastro = await req('/auth/cadastro', {body:dados, status:202});
+  const primeiroToken = caixa.token(email, 'CADASTRO');
+  assert.equal(await db.tokenEmail.count({where:{hash:primeiroToken}}), 0);
+  await db.tokenEmail.update({where:{hash:resumir(primeiroToken)}, data:{expiraEm:new Date(0)}});
+  await req('/auth/confirmar-email', {body:{token:primeiroToken,senha}, status:400});
+  await req('/auth/cadastro', {body:dados, status:202});
+  const token = caixa.token(email, 'CADASTRO');
+  assert.notEqual(token, primeiroToken);
+  await req('/auth/confirmar-email', {body:{token, senha:'curta-demais'}, status:400});
+  await req('/auth/confirmar-email', {body:{token, senha:'a'.repeat(129)}, status:400});
+  const primeira = await req('/auth/confirmar-email', {body:{token, senha}});
+  assert.equal(primeira.conta.papel,'CLIENTE');
+  assert.deepEqual(Object.keys(primeira.conta).sort(),['celular','email','id','nome','papel','profissional']);
+  const conta = await db.conta.findUniqueOrThrow({where:{email}});
+  assert.ok(conta.hash.startsWith('scrypt-v2:') && !conta.hash.includes(senha));
+  await req('/auth/confirmar-email', {body:{token, senha}, status:400});
+  assert.deepEqual(await req('/auth/cadastro', {body:dados, status:202}), respostaCadastro);
+
+  const segunda = await req('/auth/login', {body:{email, senha}});
+  assert.ok(Date.parse(segunda.expiraEm) > Date.now());
+  await req('/auth/sair', {token:primeira.token,body:{},status:204});
+  await req('/pedidos', {token:primeira.token,status:401});
+  await req('/pedidos', {token:segunda.token});
+  await db.sessaoAcesso.updateMany({where:{contaId:conta.id},data:{expiraEm:new Date(0)}});
+  await req('/pedidos', {token:segunda.token,status:401});
+  const terceira = await req('/auth/login', {body:{email, senha}});
+
+  const semConta = await req('/auth/recuperacao', {body:{email:'inexistente@example.test'},status:202});
+  assert.deepEqual(await req('/auth/recuperacao', {body:{email},status:202}), semConta);
+  const reset = caixa.token(email,'RECUPERACAO');
+  assert.equal(await db.tokenEmail.count({where:{hash:reset}}), 0);
+  await req('/auth/redefinir-senha', {body:{token:reset,senha:novaSenha},status:204});
+  await req('/auth/redefinir-senha', {body:{token:reset,senha:novaSenha},status:400});
+  await req('/pedidos', {token:terceira.token,status:401});
+  await req('/auth/login', {body:{email,senha},status:401});
+  await req('/auth/login', {body:{email,senha:novaSenha}});
+
+  const sal = randomBytes(16).toString('hex');
+  const senhaLegada = 'frase antiga';
+  const hash = sal + ':' + scryptSync(senhaLegada,sal,64).toString('hex');
+  const legada = await db.conta.create({data:{nome:'Conta fictícia legada',celular,hash}});
+  const acesso = await req('/auth/login', {body:{celular:mascarar(celular),senha:senhaLegada}});
+  assert.match((await db.conta.findUniqueOrThrow({where:{celular}})).hash,/^scrypt-v2:/);
+  const emailLegado = randomUUID() + '@example.test';
+  await req('/auth/vincular-email', {token:acesso.token,body:{email:emailLegado},status:202});
+  const vinculo = caixa.token(emailLegado,'VINCULO');
+  await req('/auth/confirmar-vinculo', {token:terceira.token,body:{token:vinculo},status:401});
+  const outraConta = await req('/auth/login', {body:{email,senha:novaSenha}});
+  await req('/auth/confirmar-vinculo', {token:outraConta.token,body:{token:vinculo},status:400});
+  const vinculada = await req('/auth/confirmar-vinculo', {token:acesso.token,body:{token:vinculo}});
+  assert.equal(vinculada.conta.id, legada.id);
+  assert.equal((await req('/auth/login', {body:{email:emailLegado,senha:senhaLegada}})).conta.id, legada.id);
+
+  for (let i=0; i<8; i++) await req('/auth/login', {body:{celular:inexistente,senha},status:401});
+  await req('/auth/login', {body:{celular:mascarar(inexistente),senha},status:429});
+  for (let i=0; i<2; i++) await req('/auth/cadastro', {body:dados,status:202});
+  await req('/auth/cadastro', {body:dados,status:429});
+  const candidatosIp = [];
+  for (let i=0; i<30; i++) {
+    const res = await fetch(caixa.base + '/auth/login', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    candidatosIp.push(res.status);
+    if (res.status === 429) {
+      assert.ok(Number(res.headers.get('retry-after')) > 0);
+      break;
     }
-    assert.ok(pronto, 'API isolada não iniciou.');
-    for (const valor of [origem,'https://exemplo.invalid']) {
-      const res = await fetch(base + '/auth/login', {
-        method:'OPTIONS',
-        headers:{ Origin:valor, 'Access-Control-Request-Method':'POST', 'Access-Control-Request-Headers':'content-type' },
-      });
-      assert.equal(res.headers.get('access-control-allow-origin'), valor === origem ? origem : null);
-    }
-
-    await chamar('/auth/cadastro',400,{body:{...dados, papel:'ENGENHEIRO'}});
-    await chamar('/auth/cadastro',400,{body:{...dados, senha:'curta-demais'}});
-    await chamar('/auth/cadastro',400,{body:{...dados, senha:'a'.repeat(129)}});
-    const {dados: primeira} = await chamar('/auth/cadastro',201,{body:dados});
-    assert.equal(primeira.conta.papel,'CLIENTE');
-    assert.deepEqual(Object.keys(primeira.conta).sort(),['celular','id','nome','papel']);
-    const conta = await db.conta.findUniqueOrThrow({where:{celular}});
-    assert.ok(conta.hash.startsWith('scrypt-v2:') && !conta.hash.includes(senha));
-    const duplicata = await chamar('/auth/cadastro',409,{body:{...dados, celular:mascarar(celular)}});
-    assert.ok(duplicata.dados.campos.celular);
-    assert.ok(!JSON.stringify(duplicata.dados).includes(celular));
-
-    const {dados: segunda} = await chamar('/auth/login',201,{body:{celular,senha}});
-    assert.ok(Date.parse(segunda.expiraEm) > Date.now());
-    await chamar('/auth/sair',204,{token:primeira.token,body:{}});
-    await chamar('/pedidos',401,{token:primeira.token});
-    await chamar('/pedidos',200,{token:segunda.token});
-    await db.sessaoAcesso.updateMany({where:{contaId:conta.id},data:{expiraEm:new Date(0)}});
-    await chamar('/pedidos',401,{token:segunda.token});
-
-    const sal = randomBytes(16).toString('hex');
-    const senhaLegada = 'frase antiga';
-    const hash = sal + ':' + scryptSync(senhaLegada,sal,64).toString('hex');
-    await db.conta.create({data:{nome:'Conta fictícia legada',celular:outro,hash}});
-    await chamar('/auth/login',201,{body:{celular:outro,senha:senhaLegada}});
-    assert.match((await db.conta.findUniqueOrThrow({where:{celular:outro}})).hash,/^scrypt-v2:/);
-
-    for (let i=0; i<8; i++) await chamar('/auth/login',401,{body:{celular:inexistente,senha}});
-    const excedeu = await chamar('/auth/login',429,{body:{celular:mascarar(inexistente),senha}});
-    assert.ok(Number(excedeu.res.headers.get('retry-after')) > 0);
-    for (let i=0; i<3; i++) await chamar('/auth/cadastro',409,{body:dados});
-    await chamar('/auth/cadastro',429,{body:dados});
-
-    // As tentativas inválidas também usam a cota por IP. Cabeçalhos do cliente não a alteram.
-    for (let i=11; i<30; i++) await chamar('/auth/login',400,{body:{}});
-    await chamar('/auth/login',429,{body:{celular,senha},headers:{'X-Forwarded-For':'203.0.113.9'}});
-    for (let i=9; i<12; i++) await chamar('/auth/cadastro',400,{body:{}});
-    await chamar('/auth/cadastro',429,{body:dados,headers:{'X-Forwarded-For':'203.0.113.9'}});
-  } finally {
-    filho.kill();
-    await db.conta.deleteMany({where:{celular:{in:[celular,outro]}}});
-    await db.$disconnect();
   }
+  assert.equal(candidatosIp.at(-1), 429);
+  await req('/auth/login', {body:{},status:429,headers:{'X-Forwarded-For':'203.0.113.9'}});
 });

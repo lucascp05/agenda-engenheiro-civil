@@ -1,45 +1,48 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { randomInt } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
+import { PrismaClient } from '@prisma/client';
+import { iniciarApi, requisicoes } from './ambiente.mjs';
+import senhaApi from '../dist/senha.js';
 
-const base = process.env.TEST_API_URL || 'http://localhost:3000';
 const senha = 'Senha fictícia suíte de integração';
 
-async function req(path, {token, body, status = body ? 201 : 200} = {}) {
-  const res = await fetch(base + path, {
-    method: body ? 'POST' : 'GET',
-    headers: { ...(token && { Authorization: 'Bearer ' + token }), ...(body && { 'Content-Type': 'application/json' }) },
-    body: body && JSON.stringify(body),
-  });
-  assert.equal(res.status, status, path);
-  return res.json();
-}
+test('fluxo real, permissões, filtros e agendamento concorrente', async t => {
+  const db = new PrismaClient();
+  t.after(() => db.$disconnect());
+  const celular = '849' + randomInt(10000000, 99999999);
+  const dono = await db.conta.create({ data: {
+    celular, nome: 'Profissional fictício', hash: await senhaApi.gerarHash(senha), papel: 'ENGENHEIRO',
+  } });
+  const caixa = await iniciarApi(t, { AGENDA_OWNER_ID: dono.id });
+  const { base } = caixa;
+  const req = requisicoes(base);
 
-async function cliente(nome) {
-  const numero = String(randomInt(10000000, 99999999));
-  const celular = '849' + numero;
-  const mascarado = '(84) 9' + numero.slice(0, 4) + '-' + numero.slice(4);
-  const cadastro = await req('/auth/cadastro', {body: {nome, celular: mascarado, senha}});
-  assert.equal(cadastro.conta.celular, celular);
-  assert.equal(cadastro.conta.papel, 'CLIENTE');
-  await req('/auth/cadastro', {body: {nome, celular, senha}, status: 409});
-  return (await req('/auth/login', {body: {celular, senha}})).token;
-}
+  async function cliente(nome) {
+    const email = randomUUID() + '@example.test';
+    await req('/auth/cadastro', {body: {nome, email: email.toUpperCase()}, status: 202});
+    await req('/auth/login', {body: {email, senha}, status: 401});
+    const cadastro = await req('/auth/confirmar-email', {body: {token: caixa.token(email, 'CADASTRO'), senha}});
+    assert.equal(cadastro.conta.email, email);
+    assert.equal(cadastro.conta.celular, null);
+    assert.equal(cadastro.conta.papel, 'CLIENTE');
+    assert.equal(cadastro.conta.profissional, false);
+    return (await req('/auth/login', {body: {email, senha}})).token;
+  }
 
-test('fluxo real, permissões, filtros e agendamento concorrente', async () => {
   await req('/saude');
   await req('/pedidos', {status: 401});
-  const { ENGINEER_PHONE: celular, ENGINEER_PASSWORD: senha } = process.env;
-  assert.ok(celular && senha, 'Defina as credenciais da conta de demonstração no ambiente de teste.');
   const acessoEngenheiro = await req('/auth/login', {body: {celular, senha}});
-  assert.equal(acessoEngenheiro.conta.papel, 'ENGENHEIRO');
+  assert.equal(acessoEngenheiro.conta.profissional, true);
   const engenheiro = acessoEngenheiro.token;
   const primeiro = await cliente('Cliente Demo A');
   const segundo = await cliente('Cliente Demo B');
-  const dados = {servico: 'Topografia', municipio: 'Mossoró', comunidade: 'Sítio Demo', local: 'Entrada da comunidade', descricao: 'Levantamento do terreno fictício'};
+  const dados = {servico: 'Topografia', celular: '(84) 90000-1234', link: 'https://example.test/local', municipio: 'Mossoró', comunidade: 'Sítio Demo', local: 'Entrada da comunidade', descricao: 'Levantamento do terreno fictício'};
   const a = await req('/pedidos', {token: primeiro, body: dados});
   const b = await req('/pedidos', {token: segundo, body: {...dados, comunidade: 'Outro sítio'}});
   assert.equal(a.situacao, 'RECEBIDO');
+  assert.equal(a.celular, '84900001234');
+  assert.equal(a.link, dados.link);
   assert.equal((await req('/pedidos', {token: primeiro})).length, 1);
   await req('/pedidos/' + a.id, {token: segundo, status: 404});
   await req('/pedidos/' + a.id + '/informacoes', {token: primeiro, body: {texto: 'Mensagem'}, status: 403});
@@ -58,7 +61,7 @@ test('fluxo real, permissões, filtros e agendamento concorrente', async () => {
     .flatMap(p => p.visita ? [p.visita.horario] : []));
   const dias = Array.from({length: 365}, (_, i) =>
     new Date(Date.now() + (i + 2) * 86400000).toISOString().slice(0, 10));
-  const dia = dias.find(data => ['06:00', '07:00', '09:00'].every(h =>
+  const dia = dias.find(data => ['06:00', '07:00', '09:00', '10:00', '11:00'].every(h =>
     !ocupados.has(new Date(data + 'T' + h + ':00-03:00').toISOString())));
   assert.ok(dia, 'Deve haver um dia com horários livres no banco de demonstração.');
   const hora = '09:00';
@@ -88,9 +91,20 @@ test('fluxo real, permissões, filtros e agendamento concorrente', async () => {
     body: JSON.stringify({pedidoId: perdedor.id, dia, hora}),
   }));
   assert.deepEqual((await Promise.all(horarios)).map(r => r.status).sort(), [201,409]);
+  const ocupado = await req('/pedidos/' + perdedor.id, {token: engenheiro});
+  const remarcacao = {pedidoId: vencedor.id, dia, horarioAnterior: salvo.visita.horario};
+  const remarcar = (hora, token = engenheiro, status = 201) =>
+    req('/visitas/remarcacao', {token, body: {...remarcacao, hora}, status});
+  await remarcar('10:00', tokenVencedor, 403);
+  await remarcar(ocupado.visita.horario.slice(11, 16) === '09:00' ? '06:00' : '07:00', engenheiro, 409);
+  const remarcado = await remarcar('10:00');
+  assert.equal(remarcado.visita.id, salvo.visita.id);
+  await remarcar('11:00', engenheiro, 409);
+  assert.equal((await req('/pedidos/' + vencedor.id, {token: tokenVencedor})).visita.horario,
+    new Date(dia + 'T10:00:00-03:00').toISOString());
   await req('/pedidos/' + vencedor.id + '/conclusao', {token: engenheiro, body: {}});
   const concluido = await req('/pedidos/' + vencedor.id, {token: tokenVencedor});
   assert.equal(concluido.situacao, 'CONCLUIDO');
-  assert.deepEqual(concluido.visita, salvo.visita);
+  assert.deepEqual(concluido.visita, remarcado.visita);
   assert.ok(!(await req('/visitas', {token: engenheiro})).some(v => v.pedido.id === vencedor.id));
 });

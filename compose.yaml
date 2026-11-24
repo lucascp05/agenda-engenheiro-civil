@@ -19,12 +19,14 @@ services:
       DATABASE_URL: postgresql://agenda:${POSTGRES_PASSWORD}@db:5432/agenda
       JWT_SECRET: ${JWT_SECRET:?Configure JWT_SECRET em .env}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+      AGENDA_OWNER_ID: ${AGENDA_OWNER_ID:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      EMAIL_SITE_URL: ${EMAIL_SITE_URL:-http://localhost:8080}
+      EMAIL_TEST_URL: ${EMAIL_TEST_URL:-}
       ENGINEER_NAME: ${ENGINEER_NAME:-}
       ENGINEER_PHONE: ${ENGINEER_PHONE:-}
       ENGINEER_PASSWORD: ${ENGINEER_PASSWORD:-}
-      ADMIN_NAME: ${ADMIN_NAME:-}
-      ADMIN_PHONE: ${ADMIN_PHONE:-}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     depends_on:
       db:
         condition: service_healthy
