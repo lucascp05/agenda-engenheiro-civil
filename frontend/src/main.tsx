@@ -108,8 +108,9 @@ function Formulario({ titulo, enviar, children }: {
 
 const avisoEmail = 'Cadastro e recuperação por e-mail estão indisponíveis nesta versão. Entre com uma conta existente.';
 
-function Acesso({ entrar, profissional, destino, cadastro = false, alternarCadastro, emailDisponivel }: {
+function Acesso({ entrar, voltar, profissional, destino, cadastro = false, alternarCadastro, emailDisponivel }: {
   entrar: (sessao: Sessao) => Promise<void> | void;
+  voltar?: () => void;
   profissional?: boolean;
   destino?: 'novo' | 'pedidos';
   cadastro?: boolean;
@@ -137,6 +138,9 @@ function Acesso({ entrar, profissional, destino, cadastro = false, alternarCadas
     alternarCadastro?.(novoCadastro);
   }
   return <section className="painel estreito acesso painel-formulario">
+    {voltar && <button type="button" className="texto voltar-acesso" onClick={voltar}>
+      <span aria-hidden="true">←</span> Voltar
+    </button>}
     <h1>{titulo}</h1>
     {cadastro && !emailBloqueado && <p>Informe seu nome e e-mail. Você vai criar a senha ao abrir o link de confirmação.</p>}
     {!cadastro && !recuperar && destino === 'novo' && <p>{emailDisponivel === false ? 'Entre para continuar com seu pedido.' : 'Entre ou crie uma conta para continuar com seu pedido.'}</p>}
@@ -521,7 +525,7 @@ function App() {
     <main className="limite" id="area-profissional">
       {aviso && <p className="aviso" role="status">{aviso}</p>}
       {tela === 'inicio' && <Capa pedir={() => !sessao || cliente ? ir('novo') : abrirAreaProfissional()} acompanhar={() => !sessao || cliente ? ir('pedidos') : abrirAreaProfissional()}/>}
-      {tela === 'acesso-profissional' && <Acesso key={tela} profissional entrar={entrar} emailDisponivel={emailDisponivel}/>}
+      {tela === 'acesso-profissional' && <Acesso key={tela} profissional entrar={entrar} voltar={() => ir('inicio')} emailDisponivel={emailDisponivel}/>}
       {tela === 'conta' && sessao && <section className="painel estreito painel-formulario">
         <h1>Minha conta</h1>
         {sessao.conta.email ? <p>E-mail verificado: {sessao.conta.email}</p> :
@@ -552,7 +556,7 @@ function App() {
           }</Formulario>
         </section>}
       </>}
-      {!sessao && (tela === 'novo' || tela === 'pedidos') && <Acesso key={tela} entrar={entrar} destino={tela} cadastro={cadastroDireto} alternarCadastro={setCadastroDireto} emailDisponivel={emailDisponivel}/>}
+      {!sessao && (tela === 'novo' || tela === 'pedidos') && <Acesso key={tela} entrar={entrar} voltar={() => ir('inicio')} destino={tela} cadastro={cadastroDireto} alternarCadastro={setCadastroDireto} emailDisponivel={emailDisponivel}/>}
       {cliente && tela === 'novo' && <NovoPedido enviar={async dados => {
         await enviar('/pedidos', dados);
         ir('pedidos');
