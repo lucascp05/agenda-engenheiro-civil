@@ -34,7 +34,7 @@ Rode esses comandos somente em banco de teste. As suítes exercitam o envio simu
 | VITE_API_URL | URL da API incorporada à compilação React. |
 | ENGINEER_NAME, ENGINEER_PHONE, ENGINEER_PASSWORD | Conta fictícia para o seed local. |
 | AGENDA_OWNER_ID | UUID da conta profissional existente, confirmado com o titular. |
-| AGENDA_OWNER_EMAIL | Caixa privada e autorizada usada somente pelo comando de convite. |
+| AGENDA_OWNER_EMAIL | E-mail privado do titular selecionado por AGENDA_OWNER_ID. Com envio configurado, habilita a solicitação de convite pela Área do profissional e reserva o endereço para a conta preservada. |
 | RESEND_API_KEY, EMAIL_FROM | Chave privada de envio e endereço remetente verificado. |
 | EMAIL_SITE_URL, EMAIL_TEST_URL | URL do site e receptor simulado para uso local. |
 | SITE_DOMAIN, API_DOMAIN | Domínios HTTPS servidos pelo Caddy. |
@@ -79,7 +79,7 @@ A API aceita dia e hora no início de cada hora de Brasília. Ao agendar, o esta
 2. Confirme com o titular qual UUID corresponde à conta profissional existente. Faça backup privado do PostgreSQL com pg_dump em formato customizado e valide com pg_restore --list. Guarde também a revisão anterior e a configuração privada para eventual retorno.
 3. Restaure em um banco isolado e ensaie `prisma migrate deploy` com a nova imagem. Compare as quantidades e os vínculos de contas, pedidos e visitas antes e depois. Use uma configuração de ensaio separada que bloqueie envio para clientes reais.
 4. Configure AGENDA_OWNER_ID no ambiente privado de publicação. Configure o remetente verificado e a chave de envio do Resend. Desative rastreamento de links nos e-mails de autenticação. Teste o acesso do titular em uma instância privada com a cópia e confirme o recebimento em uma caixa autorizada. [API de envio do Resend](https://resend.com/docs/api-reference/emails/send-email)
-5. Quando o titular precisar escolher a senha, informe a caixa autorizada em AGENDA_OWNER_EMAIL no ambiente privado do processo e execute `npm run convidar:profissional` no contêiner da versão correspondente. O comando envia um link ao titular. Ele abre o link, cria a senha e entra em **Área do profissional** com o e-mail e a senha. Com credenciais legadas válidas, ele também pode usar **Já tenho conta por celular**, entrar e vincular o e-mail em **Minha conta**.
+5. Depois de confirmar a entrega real em uma caixa autorizada, configure AGENDA_OWNER_EMAIL junto com o UUID da conta preservada na prévia. O titular abre **Área do profissional → Ativar acesso profissional**, informa o e-mail e recebe um link de uso único válido por 20 minutos. Ele define a senha, entra com e-mail e senha e verifica **Pedidos** e **Agenda**. O comando administrativo `npm run convidar:profissional` também está disponível. Mantenha a seleção da conta de demonstração na produção durante essa validação.
 6. Após a validação privada, aplique a versão revisada da origin/main com o mesmo projeto Compose e o mesmo volume. Use os domínios existentes, confira o SHA e teste a entrega real. Planeje o retorno dos serviços para a imagem anterior e preserve qualquer pedido recebido depois da atualização caso seja necessária uma restauração.
 
 ```dotenv

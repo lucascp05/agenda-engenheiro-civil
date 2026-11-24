@@ -20,6 +20,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:?Configure JWT_SECRET em .env}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
       AGENDA_OWNER_ID: ${AGENDA_OWNER_ID:-}
+      AGENDA_OWNER_EMAIL: ${AGENDA_OWNER_EMAIL:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       EMAIL_FROM: ${EMAIL_FROM:-}
       EMAIL_SITE_URL: ${EMAIL_SITE_URL:-http://localhost:8080}

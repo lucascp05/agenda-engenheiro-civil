@@ -2,7 +2,7 @@ import 'dotenv/config';
 import 'reflect-metadata';
 import {
   BadRequestException, Body, CanActivate, ConflictException, Controller, createParamDecorator,
-  ExecutionContext, ForbiddenException, Get, HttpCode, Injectable, Module, NotFoundException, Param,
+  ExecutionContext, ForbiddenException, Get, HttpCode, HttpException, Injectable, Module, NotFoundException, Param,
   ParseUUIDPipe, Post, Query, Res, UnauthorizedException, UseGuards, ValidationPipe, type ValidationError,
 } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
@@ -51,6 +51,7 @@ if (publicacao && new URL(process.env.DATABASE_URL ?? '').password === 'apenas-d
   throw new Error('Configure uma senha própria para o PostgreSQL.');
 }
 const proprietario = process.env.AGENDA_OWNER_ID?.trim();
+const emailProprietario = process.env.AGENDA_OWNER_EMAIL?.trim().toLowerCase();
 const ehProprietario = (id: string, papel: Papel) => papel === 'ENGENHEIRO' && id === proprietario;
 const duracaoSessao = 8 * 60 * 60;
 
@@ -106,7 +107,11 @@ class Acesso {
 
   @Get('auth/recursos')
   recursos() {
-    return { emailDisponivel: this.email.disponivel() };
+    const emailDisponivel = this.email.disponivel();
+    return {
+      emailDisponivel,
+      ...(emailDisponivel && proprietario && emailProprietario ? { conviteProfissionalDisponivel: true } : {}),
+    };
   }
 
   @Post('auth/cadastro')
@@ -115,7 +120,7 @@ class Acesso {
   async cadastro(@Body() dados: CadastroDto, @Res({ passthrough: true }) res: RespostaComCabecalho) {
     this.email.exigirDisponibilidade();
     this.limites.consumir('cadastro-email:' + dados.email, 5, res);
-    if (!await this.db.conta.count({ where: { email: dados.email } })) {
+    if (dados.email !== emailProprietario && !await this.db.conta.count({ where: { email: dados.email } })) {
       await this.email.enviar({ finalidade: 'CADASTRO', ...dados });
     }
     return { mensagem: 'Se o endereço puder ser cadastrado, você receberá um link para criar sua conta.' };
@@ -127,6 +132,7 @@ class Acesso {
     try {
       const conta = await this.db.$transaction(async tx => {
         const registro = await this.email.consumir(tx, dados.token, 'CADASTRO');
+        if (registro.email === emailProprietario) throw new ConflictException('Este link já não pode ser usado.');
         return tx.conta.create({
           data: { email: registro.email, nome: registro.nome!, hash: await gerarHash(dados.senha), papel: 'CLIENTE' },
           select: contaPublica,
@@ -225,6 +231,9 @@ class Acesso {
     try {
       await this.db.$transaction(async tx => {
         const registro = await this.email.consumir(tx, dados.token, 'PROPRIETARIO', proprietario);
+        if (emailProprietario && registro.email !== emailProprietario) {
+          throw new BadRequestException('Convite inválido ou vencido.');
+        }
         const resultado = await tx.conta.updateMany({
           where: {
             id: proprietario, papel: 'ENGENHEIRO', versaoSessao: registro.versao!,
@@ -239,6 +248,28 @@ class Acesso {
       if (erroUnico(erro)) throw new ConflictException('Este e-mail já pertence a outra conta.');
       throw erro;
     }
+  }
+
+  @Post('auth/convite-profissional')
+  @HttpCode(202)
+  @UseGuards(LimitePorIp)
+  async conviteProfissional(@Body() dados: EmailDto) {
+    const resposta = { mensagem: 'Se o endereço estiver autorizado, você receberá um link para definir sua senha.' };
+    if (!proprietario || !emailProprietario || !this.email.disponivel() || dados.email !== emailProprietario) return resposta;
+    try {
+      this.limites.consumir('convite-profissional:' + proprietario, 3, { setHeader() {} });
+    } catch (erro) {
+      if (erro instanceof HttpException && erro.getStatus() === 429) return resposta;
+      throw erro;
+    }
+    const conta = await this.db.conta.findUnique({ where: { id: proprietario } });
+    if (conta?.papel === 'ENGENHEIRO' && conta.email === null &&
+        !await this.db.conta.count({ where: { email: emailProprietario } })) {
+      await this.email.enviar({
+        finalidade: 'PROPRIETARIO', contaId: conta.id, email: emailProprietario, versao: conta.versaoSessao,
+      }).catch(() => console.warn('Não foi possível enviar o convite profissional.'));
+    }
+    return resposta;
   }
 
   @Post('auth/sair')
