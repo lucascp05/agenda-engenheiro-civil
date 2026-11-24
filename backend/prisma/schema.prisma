@@ -1,0 +1,65 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Papel {
+  CLIENTE
+  ENGENHEIRO
+}
+
+enum Situacao {
+  RECEBIDO
+  INFORMACOES
+  MARCADO
+  CONCLUIDO
+}
+
+model Conta {
+  id      String   @id @default(uuid())
+  nome    String
+  celular String   @unique
+  hash    String
+  papel   Papel    @default(CLIENTE)
+  pedidos Pedido[]
+}
+
+model Pedido {
+  id          String   @id @default(uuid())
+  clienteId   String
+  cliente     Conta    @relation(fields: [clienteId], references: [id])
+  servico     String
+  municipio   String
+  comunidade  String?
+  local       String
+  descricao   String
+  link        String?
+  situacao    Situacao @default(RECEBIDO)
+  criadoEm    DateTime @default(now()) @db.Timestamptz(3)
+  mensagens   Mensagem[]
+  visita      Visita?
+
+  @@index([clienteId, criadoEm])
+}
+
+model Mensagem {
+  id       String   @id @default(uuid())
+  pedidoId String
+  pedido   Pedido   @relation(fields: [pedidoId], references: [id])
+  autor    Papel
+  texto    String
+  criadoEm DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([pedidoId, criadoEm])
+}
+
+model Visita {
+  id       String   @id @default(uuid())
+  pedidoId String   @unique
+  pedido   Pedido   @relation(fields: [pedidoId], references: [id])
+  horario  DateTime @unique @db.Timestamptz(3)
+}
