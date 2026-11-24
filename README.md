@@ -97,10 +97,25 @@ curl -fsS https://api.lucas.grupo-04.sd.ufersa.dev.br/saude
 
 ## Apresentação de 27/11/2026
 
+Use duas sessões de cliente de teste e uma sessão profissional autorizada, em perfis de navegador separados. No painel **Rede**, mostre **Método**, **Status** e as abas de corpo e resposta JSON. Oculte cabeçalhos de autenticação e use apenas dados fictícios.
+
 | Tempo | Demonstração |
 | --- | --- |
-| 0:00–0:35 | Mostre as três camadas e os dois domínios HTTPS. Abra /saude e demonstre HTTP 401 ao consultar /pedidos sem sessão. |
-| 0:35–1:20 | No celular, entre como cliente de teste, escolha **Topografia**, informe município, comunidade e uma referência como “entrada depois do galpão” e envie. Mostre **Pedido recebido**. |
-| 1:20–2:10 | No computador, o titular entra pelo rodapé, filtra **Pedidos** pelo município e confirma uma visita futura. Mostre o horário em **Agenda**. |
-| 2:10–2:40 | Volte ao celular, atualize **Meus pedidos** e mostre dia e hora de Brasília. |
-| 2:40–3:00 | Demonstre HTTP 403 quando um cliente tenta acessar /visitas e HTTP 404 quando outro cliente tenta consultar o pedido. Mostre no painel de rede o envio JSON para /pedidos e /visitas. |
+| 0:00–0:40 | Abra os dois domínios HTTPS e mostre `GET /saude` com **200**. Mostre os registros no Route 53 e os destinos do Caddy em `deploy/Caddyfile` após confirmar a configuração no host. |
+| 0:40–1:25 | Entre como cliente de teste, envie um pedido de **Topografia** com a referência “Porteira depois do galpão” e mostre **Pedido recebido** e `POST /pedidos` com **201**. Siga o formulário em `frontend/src/main.tsx`, o controller e o serviço em `backend/src/main.ts` e o modelo `Pedido` em `backend/prisma/schema.prisma`. |
+| 1:25–2:20 | Entre pelo rodapé com a conta profissional, confirme uma visita futura e mostre `POST /visitas` com **201**. No cliente, atualize **Meus pedidos** e confira o dia e a hora de Brasília. |
+| 2:20–3:00 | Mostre `GET /pedidos` sem sessão (**401**), `POST /visitas` com sessão de cliente (**403**) e `GET /pedidos/:id` com a sessão do segundo cliente (**404**). |
+
+Exemplo de corpo para `POST /pedidos`. O link do mapa pode ser omitido.
+
+```json
+{
+  "servico": "Topografia",
+  "municipio": "Mossoró",
+  "comunidade": "Sítio fictício",
+  "local": "Porteira depois do galpão",
+  "descricao": "Levantamento de terreno"
+}
+```
+
+Na conferência de 24/11/2026, o site respondeu **200**, a API respondeu **200** em `GET /saude` e devolveu **401** em `GET /pedidos` sem sessão, tudo por HTTPS. Os dois domínios resolveram para o mesmo IPv4 público. Em execução local da revisão de código da `origin/main`, o navegador registrou **201** nos dois envios e **200** ao recarregar os pedidos. A suíte de integração confirmou os bloqueios **401**, **403** e **404**. A revisão do host, o hash em execução, a consulta à zona pelo console ou pela API do Route 53 e o fluxo autenticado em produção ficaram pendentes. Use a execução local com dados fictícios na demonstração se o ambiente público ainda estiver nessa situação.
