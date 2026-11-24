@@ -28,7 +28,7 @@ export async function iniciarApi(t, env = {}) {
   const processo = spawn(process.execPath, ['dist/main.js'], {
     env: {
       ...process.env, ...env, PORT: String(portaApi), AGENDA_PUBLICACAO: '0',
-      EMAIL_TEST_URL: emailUrl,
+      EMAIL_TEST_URL: env.EMAIL_TEST_URL ?? emailUrl,
     },
     stdio: 'ignore',
   });

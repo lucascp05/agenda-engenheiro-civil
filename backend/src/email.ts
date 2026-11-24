@@ -16,12 +16,21 @@ const assuntos: Record<FinalidadeEmail, string> = {
 export class Email {
   constructor(private db: Db) {}
 
+  disponivel() {
+    return Boolean((process.env.AGENDA_PUBLICACAO !== '1' && process.env.EMAIL_TEST_URL) ||
+      (process.env.RESEND_API_KEY?.trim() && process.env.EMAIL_FROM?.trim()));
+  }
+
+  exigirDisponibilidade() {
+    if (!this.disponivel()) throw new ServiceUnavailableException('Cadastro e recuperação por e-mail estão indisponíveis nesta versão. Entre com uma conta existente.');
+  }
+
   async enviar(dados: Omit<Prisma.TokenEmailUncheckedCreateInput, 'hash' | 'expiraEm'>) {
+    this.exigirDisponibilidade();
     const publico = process.env.AGENDA_PUBLICACAO === '1';
     const teste = publico ? undefined : process.env.EMAIL_TEST_URL;
     const chave = process.env.RESEND_API_KEY;
     const remetente = process.env.EMAIL_FROM;
-    if (!teste && (!chave || !remetente)) throw new ServiceUnavailableException('Envio de e-mail temporariamente indisponível.');
     const agora = new Date();
     const token = randomBytes(32).toString('hex');
     const hash = resumir(token);

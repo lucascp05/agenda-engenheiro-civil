@@ -62,6 +62,7 @@ A API aceita dia e hora no início de cada hora de Brasília. Ao agendar, o esta
 | --- | --- |
 | GET /saude | Público. Verifica a conexão com o banco. |
 | POST /auth/cadastro, /auth/confirmar-email, /auth/login | Público. Cadastro por e-mail e login por e-mail ou celular legado. |
+| GET /auth/recursos | Público. Informa se as operações de envio de e-mail estão disponíveis. |
 | POST /auth/recuperacao, /auth/redefinir-senha | Público. Recuperação pelo e-mail verificado. |
 | POST /auth/vincular-email, /auth/confirmar-vinculo, /auth/sair | Conta autenticada. |
 | POST /auth/ativar-profissional | Convite de uso único emitido pelo operador para a conta do titular. |
@@ -97,10 +98,33 @@ curl -fsS https://api.lucas.grupo-04.sd.ufersa.dev.br/saude
 
 ## Apresentação de 27/11/2026
 
+Na versão acadêmica, o cadastro e a recuperação por e-mail ficam indisponíveis enquanto o envio estiver sem configuração. As duas contas fictícias são provisionadas pelo operador, fora do cadastro público. O procedimento não verifica nem vincula endereços de e-mail.
+
+1. O operador mantém as duas senhas distintas no arquivo privado `/opt/agenda/.demonstracao.env` da EC2. Em uma sessão administrativa já autorizada, carregue o arquivo com `set -a; . /opt/agenda/.demonstracao.env; set +a` e execute `docker exec -e DEMO_CLIENTE_A_SENHA -e DEMO_CLIENTE_B_SENHA agenda-api-1 npm run seed:demonstracao`. O comando cria somente as contas fictícias de cliente. Transmita as senhas aos participantes por um canal privado.
+2. Em dois perfis de navegador, abra **Entrar** → **Já tenho conta por celular**. Use `11900000001` para o cliente A e `11900000002` para o cliente B, cada um com a senha correspondente.
+3. Em um terceiro perfil, o titular abre **Área do profissional** → **Já tenho conta por celular** e usa as próprias credenciais. Se já vinculou um e-mail verificado, pode usá-lo para entrar. Após a demonstração, saia das três sessões.
+
+Use duas sessões de cliente de teste e uma sessão profissional autorizada, em perfis de navegador separados. No painel **Rede**, mostre **Método**, **Status** e as abas de corpo e resposta JSON. Oculte cabeçalhos de autenticação e use apenas dados fictícios.
+
 | Tempo | Demonstração |
 | --- | --- |
-| 0:00–0:35 | Mostre as três camadas e os dois domínios HTTPS. Abra /saude e demonstre HTTP 401 ao consultar /pedidos sem sessão. |
-| 0:35–1:20 | No celular, entre como cliente de teste, escolha **Topografia**, informe município, comunidade e uma referência como “entrada depois do galpão” e envie. Mostre **Pedido recebido**. |
-| 1:20–2:10 | No computador, o titular entra pelo rodapé, filtra **Pedidos** pelo município e confirma uma visita futura. Mostre o horário em **Agenda**. |
-| 2:10–2:40 | Volte ao celular, atualize **Meus pedidos** e mostre dia e hora de Brasília. |
-| 2:40–3:00 | Demonstre HTTP 403 quando um cliente tenta acessar /visitas e HTTP 404 quando outro cliente tenta consultar o pedido. Mostre no painel de rede o envio JSON para /pedidos e /visitas. |
+| 0:00–0:40 | Abra os dois domínios HTTPS e mostre `GET /saude` com **200**. Mostre os registros no Route 53 e os destinos do Caddy em `deploy/Caddyfile` após confirmar a configuração no host. |
+| 0:40–1:25 | Entre como cliente de teste, envie um pedido de **Topografia** com a referência “Porteira depois do galpão” e mostre **Pedido recebido** e `POST /pedidos` com **201**. Siga o formulário em `frontend/src/main.tsx`, o controller e o serviço em `backend/src/main.ts` e o modelo `Pedido` em `backend/prisma/schema.prisma`. |
+| 1:25–2:20 | Entre pelo rodapé com a conta profissional, confirme uma visita futura e mostre `POST /visitas` com **201**. No cliente, atualize **Meus pedidos** e confira o dia e a hora de Brasília. |
+| 2:20–3:00 | Mostre `GET /pedidos` sem sessão (**401**), `POST /visitas` com sessão de cliente (**403**) e `GET /pedidos/:id` com a sessão do segundo cliente (**404**). |
+
+Exemplo de corpo para `POST /pedidos`. O link do mapa pode ser omitido.
+
+```json
+{
+  "servico": "Topografia",
+  "municipio": "Mossoró",
+  "comunidade": "Sítio fictício",
+  "local": "Porteira depois do galpão",
+  "descricao": "Levantamento de terreno"
+}
+```
+
+Na conferência de 24/11/2026, o Route 53 mostrou dois registros A com TTL de 60 segundos apontando para o IP elástico `50.16.228.161`. Na EC2, o Caddy ativo encaminhou o site para `web:8080` e a API para `api:3000`. O site e `GET /saude` responderam **200** por HTTPS. `GET /pedidos` e `GET /visitas` sem sessão devolveram **401**.
+
+A publicação tinha duas revisões. Os arquivos da API corresponderam a `f9da5d8`. Os arquivos da interface corresponderam à versão de compatibilidade incorporada em `f9daf4d`, servida pela imagem `agenda-visual:20261124T063449Z`. O fluxo autenticado em produção ainda precisa ser conferido com contas autorizadas. Na execução local da `origin/main`, o navegador registrou **201** nos dois envios e **200** ao recarregar os pedidos. A suíte confirmou os bloqueios **401**, **403** e **404**. Use a execução local com dados fictícios se o fluxo público ainda estiver pendente no dia da apresentação.

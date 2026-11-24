@@ -6,6 +6,19 @@ import { iniciarApi, requisicoes } from './ambiente.mjs';
 
 const resumir = token => createHash('sha256').update(token).digest('hex');
 
+test('cadastro e recuperação informam indisponibilidade sem remetente', async t => {
+  const { base } = await iniciarApi(t, { EMAIL_TEST_URL: '', RESEND_API_KEY: '', EMAIL_FROM: '' });
+  const req = requisicoes(base);
+  assert.deepEqual(await req('/auth/recursos'), { emailDisponivel: false });
+  const email = 'cliente-ficticio@example.test';
+  for (const [rota, body] of [
+    ['/auth/cadastro', { nome: 'Cliente fictício', email }],
+    ['/auth/recuperacao', { email }],
+  ]) {
+    assert.match((await req(rota, { body, status: 503 })).message, /indisponíveis/);
+  }
+});
+
 test('sessão, senhas, CORS, limites e verificação por e-mail', { timeout: 30000 }, async t => {
   const origem = 'http://localhost:8080';
   const caixa = await iniciarApi(t, { CORS_ORIGINS: origem });
