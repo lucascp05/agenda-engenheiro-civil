@@ -5,8 +5,10 @@
     "build": "prisma generate && tsc",
     "start": "node dist/main.js",
     "seed": "node dist/seed.js",
+    "seed:admin": "node dist/seed.js --admin",
     "test": "node --test test/e2e.mjs",
-    "test:seguranca": "node --test test/seguranca.mjs"
+    "test:seguranca": "node --test test/seguranca.mjs",
+    "test:profissionais": "node --test test/profissionais.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",

@@ -3,18 +3,18 @@ import 'reflect-metadata';
 import {
   BadRequestException, Body, CanActivate, ConflictException, Controller, createParamDecorator,
   ExecutionContext, ForbiddenException, Get, HttpCode, Injectable, Module, NotFoundException, Param,
-  ParseUUIDPipe, Post, Query, Res, UnauthorizedException, UseGuards, ValidationPipe,
+  ParseUUIDPipe, Post, Query, Res, UnauthorizedException, UseGuards, ValidationPipe, type ValidationError,
 } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import { Papel, Prisma, Situacao } from '@prisma/client';
 import helmet from 'helmet';
 import { Db } from './db';
-import { CadastroDto, FiltrosDto, LoginDto, MensagemDto, PedidoDto, VisitaDto } from './dto';
+import { CadastroDto, CadastroProfissionalDto, ConsentimentoDto, FiltrosDto, LoginDto, MensagemDto, PedidoDto, PerfilProfissionalDto, RevisaoProfissionalDto, VisitaDto } from './dto';
 import { gerarHash, hashLegado, hashReserva, verificarSenha } from './senha';
 import { LimiteAcesso, type RespostaComCabecalho } from './limite-acesso';
 
-type Sessao = { sub: string; papel: Papel; id: string };
+type Sessao = { sub: string; papel: Papel; id: string; profissionalAprovado: boolean };
 type TokenSessao = { sub: string; jti: string; ver: number };
 const Usuario = createParamDecorator((_, contexto: ExecutionContext) =>
   contexto.switchToHttp().getRequest().usuario as Sessao);
@@ -31,6 +31,15 @@ function erroUnico(erro: unknown) {
 
 function exigirPapel(usuario: Sessao, papel: Papel) {
   if (usuario.papel !== papel) throw new ForbiddenException('Sua conta não tem acesso a esta ação.');
+}
+
+function exigirProfissionalAprovado(usuario: Sessao) {
+  exigirPapel(usuario, 'ENGENHEIRO');
+  if (!usuario.profissionalAprovado) throw new ForbiddenException('O painel fica disponível após a aprovação profissional.');
+}
+
+function exigirAcessoAosPedidos(usuario: Sessao) {
+  if (usuario.papel !== 'CLIENTE') exigirProfissionalAprovado(usuario);
 }
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -55,10 +64,15 @@ class Autenticacao implements CanActivate {
     if (typeof dados.jti !== 'string' || typeof dados.sub !== 'string' || !Number.isInteger(dados.ver)) throw invalida();
     const sessao = await this.db.sessaoAcesso.findUnique({
       where: { id: dados.jti },
-      select: { contaId: true, expiraEm: true, conta: { select: { papel: true, versaoSessao: true } } },
+      select: { contaId: true, expiraEm: true, conta: { select: {
+        papel: true, versaoSessao: true, perfilProfissional: { select: { situacao: true } },
+      } } },
     });
     if (!sessao || sessao.contaId !== dados.sub || sessao.expiraEm <= new Date() || sessao.conta.versaoSessao !== dados.ver) throw invalida();
-    req.usuario = { id: dados.jti, sub: sessao.contaId, papel: sessao.conta.papel };
+    req.usuario = {
+      id: dados.jti, sub: sessao.contaId, papel: sessao.conta.papel,
+      profissionalAprovado: sessao.conta.perfilProfissional?.situacao === 'APROVADO',
+    };
     return true;
   }
 }
@@ -69,7 +83,7 @@ class LimitePorIp implements CanActivate {
 
   canActivate(contexto: ExecutionContext) {
     const http = contexto.switchToHttp();
-    const cadastro = contexto.getHandler().name === 'cadastro';
+    const cadastro = contexto.getHandler().name.startsWith('cadastro');
     const ip = http.getRequest<{ ip?: string }>().ip ?? 'desconhecido';
     this.limites.consumir((cadastro ? 'cadastro-ip:' : 'login-ip:') + ip, cadastro ? 12 : 30, http.getResponse());
     return true;
@@ -116,6 +130,25 @@ class Acesso {
     return this.sessao({ id, nome, celular, papel }, conta.versaoSessao);
   }
 
+  @Post('auth/cadastro-profissional')
+  @UseGuards(LimitePorIp)
+  async cadastroProfissional(@Body() dados: CadastroProfissionalDto, @Res({ passthrough: true }) res: RespostaComCabecalho) {
+    this.limites.consumir('cadastro-celular:' + dados.celular, 5, res);
+    try {
+      const conta = await this.db.conta.create({
+        data: {
+          nome: dados.nome, celular: dados.celular, hash: await gerarHash(dados.senha), papel: 'ENGENHEIRO',
+          perfilProfissional: { create: { ...dados.registro, nomeCompleto: dados.nome } },
+        },
+        select: contaPublica,
+      });
+      return this.sessao(conta, 0);
+    } catch (erro) {
+      if (erroUnico(erro)) throw new ConflictException({ message: 'Já existe uma conta com este celular. Entre para continuar.', campos: { celular: 'Já existe uma conta com este celular.' } });
+      throw erro;
+    }
+  }
+
   @Post('auth/sair')
   @HttpCode(204)
   @UseGuards(Autenticacao)
@@ -131,6 +164,96 @@ class Acesso {
       this.db.sessaoAcesso.create({ data: { contaId: conta.id, expiraEm }, select: { id: true } }),
     ]);
     return { conta, expiraEm, token: await this.jwt.signAsync({ sub: conta.id, jti: id, ver }) };
+  }
+}
+
+const dadosRegistro = {
+  nomeCompleto: true, titulo: true, creaUf: true, registro: true, revisadoEm: true,
+} satisfies Prisma.PerfilProfissionalSelect;
+const dadosSolicitacao = { ...dadosRegistro, situacao: true, autorizaPublicacao: true, criadoEm: true };
+
+@Controller('profissionais')
+class ProfissionaisController {
+  constructor(private db: Db) {}
+
+  @Get('publico')
+  async publico() {
+    const perfil = await this.db.perfilProfissional.findFirst({
+      where: { situacao: 'APROVADO', autorizaPublicacao: true },
+      select: dadosRegistro,
+    });
+    return { perfil };
+  }
+
+  @Get('meu-perfil')
+  @UseGuards(Autenticacao)
+  async meuPerfil(@Usuario() usuario: Sessao) {
+    exigirPapel(usuario, 'ENGENHEIRO');
+    const perfil = await this.db.perfilProfissional.findUnique({
+      where: { contaId: usuario.sub }, select: dadosSolicitacao,
+    });
+    return { perfil };
+  }
+
+  @Post('meu-perfil')
+  @UseGuards(Autenticacao)
+  async solicitar(@Usuario() usuario: Sessao, @Body() dados: PerfilProfissionalDto) {
+    exigirPapel(usuario, 'ENGENHEIRO');
+    try {
+      return await this.db.perfilProfissional.create({
+        data: { ...dados, contaId: usuario.sub }, select: dadosSolicitacao,
+      });
+    } catch (erro) {
+      if (erroUnico(erro)) throw new ConflictException('Esta conta já tem uma solicitação de verificação.');
+      throw erro;
+    }
+  }
+
+  @Post('meu-perfil/publicacao')
+  @UseGuards(Autenticacao)
+  async consentimento(@Usuario() usuario: Sessao, @Body() dados: ConsentimentoDto) {
+    exigirPapel(usuario, 'ENGENHEIRO');
+    const where = { contaId: usuario.sub };
+    const resultado = await this.db.perfilProfissional.updateMany({ where, data: dados });
+    if (!resultado.count) throw new NotFoundException('Envie sua solicitação de verificação primeiro.');
+    return this.db.perfilProfissional.findUniqueOrThrow({ where, select: dadosSolicitacao });
+  }
+
+  @Get('revisao')
+  @UseGuards(Autenticacao)
+  listarRevisoes(@Usuario() usuario: Sessao) {
+    exigirPapel(usuario, 'ADMIN');
+    return this.db.perfilProfissional.findMany({
+      orderBy: [{ situacao: 'asc' }, { criadoEm: 'asc' }],
+      select: { ...dadosSolicitacao, contaId: true, conta: { select: { celular: true } },
+        revisor: { select: { nome: true } }, fonteOficial: true, metodoIdentidade: true },
+    });
+  }
+
+  @Post('revisao/:id')
+  @UseGuards(Autenticacao)
+  async revisar(@Usuario() usuario: Sessao, @Param('id', ParseUUIDPipe) id: string, @Body() dados: RevisaoProfissionalDto) {
+    exigirPapel(usuario, 'ADMIN');
+    if (usuario.sub === id) throw new ForbiddenException('A revisão exige outra conta autorizada.');
+    const aprovar = dados.decisao === 'APROVADO';
+    if (aprovar && (!dados.dadosConferidos || !dados.titularConfirmado || !dados.fonteOficial || !dados.metodoIdentidade)) {
+      throw new BadRequestException('Confirme o registro na fonte oficial e a identidade por um canal independente.');
+    }
+    try {
+      const resultado = await this.db.perfilProfissional.updateMany({
+        where: { contaId: id, situacao: 'EM_ANALISE', conta: { papel: 'ENGENHEIRO' } },
+        data: {
+          situacao: dados.decisao, revisorId: usuario.sub, revisadoEm: new Date(),
+          fonteOficial: aprovar ? dados.fonteOficial : null,
+          metodoIdentidade: aprovar ? dados.metodoIdentidade : null,
+        },
+      });
+      if (!resultado.count) throw new ConflictException('A solicitação já foi revisada ou está indisponível.');
+      return { situacao: dados.decisao };
+    } catch (erro) {
+      if (erroUnico(erro)) throw new ConflictException('Já há um profissional aprovado para esta agenda compartilhada.');
+      throw erro;
+    }
   }
 }
 
@@ -202,11 +325,13 @@ class PedidosController {
 
   @Get()
   listar(@Usuario() usuario: Sessao, @Query() filtros: FiltrosDto) {
+    exigirAcessoAosPedidos(usuario);
     return this.pedidos.listar(usuario, filtros);
   }
 
   @Get(':id')
   obter(@Usuario() usuario: Sessao, @Param('id', ParseUUIDPipe) id: string) {
+    exigirAcessoAosPedidos(usuario);
     return this.pedidos.obter(id, usuario);
   }
 
@@ -217,7 +342,7 @@ class PedidosController {
 
   @Post(':id/informacoes')
   informar(@Usuario() usuario: Sessao, @Param('id', ParseUUIDPipe) id: string, @Body() dados: MensagemDto) {
-    exigirPapel(usuario, 'ENGENHEIRO');
+    exigirProfissionalAprovado(usuario);
     return this.pedidos.alterar(usuario, id, 'INFORMACOES', ['RECEBIDO','INFORMACOES'], dados.texto);
   }
 
@@ -229,7 +354,7 @@ class PedidosController {
 
   @Post(':id/conclusao')
   concluir(@Usuario() usuario: Sessao, @Param('id', ParseUUIDPipe) id: string) {
-    exigirPapel(usuario, 'ENGENHEIRO');
+    exigirProfissionalAprovado(usuario);
     return this.pedidos.alterar(usuario, id, 'CONCLUIDO', ['RECEBIDO','INFORMACOES','MARCADO']);
   }
 }
@@ -245,7 +370,7 @@ class VisitasController {
 
   @Post()
   marcar(@Usuario() usuario: Sessao, @Body() dados: VisitaDto) {
-    exigirPapel(usuario, 'ENGENHEIRO');
+    exigirProfissionalAprovado(usuario);
     const horario = new Date(dados.dia + 'T' + dados.hora + ':00-03:00');
     if (isNaN(horario.getTime()) || diaBrasilia.format(horario) !== dados.dia || horaBrasilia.format(horario) !== dados.hora || horario <= new Date()) {
       throw new BadRequestException({ message: 'Escolha um horário futuro no fuso de Brasília.', campos: { dia: 'Escolha uma data e um horário futuros.' } });
@@ -255,7 +380,7 @@ class VisitasController {
 
   @Get()
   listar(@Usuario() usuario: Sessao) {
-    exigirPapel(usuario, 'ENGENHEIRO');
+    exigirProfissionalAprovado(usuario);
     return this.pedidos.visitas();
   }
 }
@@ -266,10 +391,17 @@ class VisitasController {
     signOptions: { algorithm: 'HS256', expiresIn: duracaoSessao, issuer: 'agenda-api', audience: 'agenda-web' },
     verifyOptions: { algorithms: ['HS256'], issuer: 'agenda-api', audience: 'agenda-web' },
   })],
-  controllers: [Acesso, PedidosController, VisitasController],
+  controllers: [Acesso, PedidosController, VisitasController, ProfissionaisController],
   providers: [Db, Autenticacao, LimiteAcesso, LimitePorIp, PedidosService],
 })
 class App {}
+
+function errosDeCampos(erros: ValidationError[]): [string, string][] {
+  return erros.flatMap(erro => erro.children?.length
+    ? errosDeCampos(erro.children)
+    : [[erro.property, erro.constraints?.matches ??
+      (erro.property === 'senha' ? erro.constraints?.isLength : undefined) ?? 'Confira este campo.']]);
+}
 
 async function iniciar() {
   const origens = (process.env.CORS_ORIGINS ?? 'http://localhost:5173').split(',').map(origem => origem.trim());
@@ -293,8 +425,7 @@ async function iniciar() {
     whitelist: true, forbidNonWhitelisted: true, transform: true,
     exceptionFactory: erros => new BadRequestException({
       message: 'Confira os campos destacados.',
-      campos: Object.fromEntries(erros.map(erro => [erro.property, erro.constraints?.matches ??
-        (erro.property === 'senha' ? erro.constraints?.isLength : undefined) ?? 'Confira este campo.'])),
+      campos: Object.fromEntries(errosDeCampos(erros)),
     }),
   }));
   app.enableShutdownHooks();

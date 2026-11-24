@@ -22,6 +22,9 @@ services:
       ENGINEER_NAME: ${ENGINEER_NAME:-}
       ENGINEER_PHONE: ${ENGINEER_PHONE:-}
       ENGINEER_PASSWORD: ${ENGINEER_PASSWORD:-}
+      ADMIN_NAME: ${ADMIN_NAME:-}
+      ADMIN_PHONE: ${ADMIN_PHONE:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     depends_on:
       db:
         condition: service_healthy
