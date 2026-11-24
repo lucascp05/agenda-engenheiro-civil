@@ -492,6 +492,7 @@ function App() {
   return <>
     <header className="topo"><div className="limite barra">
       <button className="marca" onClick={() => ir('inicio')}>
+        <img src="/tatico-assis-simbolo.png" alt="" width="40" height="46"/>
         <strong>Tatico Assis</strong>
         <span>Eng. Civil Especialista</span>
       </button>

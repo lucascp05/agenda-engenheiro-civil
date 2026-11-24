@@ -22,7 +22,8 @@ a { color: #873a0d; overflow-wrap: anywhere; }
 .barra, .linha, .acoes { display: flex; gap: .65rem; flex-wrap: wrap; align-items: center; }
 .barra { justify-content: space-between; min-height: 4.5rem; padding-block: .55rem; }
 .marca, nav button, .texto { border: 0; background: transparent; color: var(--grafite); min-height: 44px; font-weight: 680; }
-.marca { padding: .3rem 0; text-align: left; display: grid; align-content: center; gap: .15rem; line-height: 1.1; color: #fff; }
+.marca { padding: .3rem 0; text-align: left; display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: .65rem; row-gap: .15rem; line-height: 1.1; color: #fff; }
+.marca img { grid-row: span 2; width: clamp(1.7rem, 5.5vw, 2.5rem); height: auto; }
 .marca strong { font-size: clamp(1.25rem, 3vw, 1.65rem); letter-spacing: -.035em; }
 .marca span { font-size: .83rem; color: #e8c6af; font-weight: 550; }
 nav { display: flex; gap: .3rem; flex-wrap: wrap; }
@@ -128,6 +129,9 @@ textarea { resize: vertical; }
 .rodape a { display: inline-flex; align-items: center; min-height: 44px; text-underline-offset: .15em; }
 @media (max-width: 360px) {
   .barra { column-gap: .35rem; }
+  .marca { column-gap: .45rem; }
+  .marca strong { font-size: 1.12rem; }
+  .marca span { font-size: .72rem; }
   nav { gap: .15rem; }
   nav button { padding-inline: .4rem; font-size: .81rem; }
   .servicos { grid-template-columns: 1fr; }
