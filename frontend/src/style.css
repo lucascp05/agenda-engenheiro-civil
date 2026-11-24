@@ -81,13 +81,11 @@ textarea { resize: vertical; }
 .confirmacao input { width: 1.35rem; min-height: 0; height: 1.35rem; flex: 0 0 auto; margin: 0; accent-color: var(--verde); }
 .invalido input, .invalido textarea, .invalido select { border-color: #9b3c25; }
 .erro, .invalido small { color: #852c1d; }
-.aviso, .retorno, .horario, .orientacao, .resposta-acesso { padding: .8rem 1rem; border-radius: .65rem; }
+.aviso, .retorno, .horario, .orientacao { padding: .8rem 1rem; border-radius: .65rem; }
 .aviso, .horario { background: #e1efde; }
 .retorno, .orientacao { background: #edf2ec; }
 .retorno.erro { background: #faebe6; }
-.acesso-negado, .resposta-acesso, .horario { margin-bottom: 1rem; }
-.resposta-acesso { background: #fcf1cc; color: #58420e; }
-.resposta-acesso p, .acesso-negado p { margin-bottom: .55rem; }
+.horario { margin-bottom: 1rem; }
 .horario span { display: block; font-size: .88rem; }
 .horario time { display: block; font-size: clamp(1.12rem, 2.5vw, 1.45rem); font-weight: 760; letter-spacing: -.02em; }
 .cabecalho { justify-content: space-between; margin-bottom: 1.25rem; }
@@ -110,8 +108,8 @@ textarea { resize: vertical; }
 .conversa li { border-left: 3px solid #b7caba; padding-left: .65rem; margin-bottom: .55rem; overflow-wrap: anywhere; }
 .cartao p { overflow-wrap: anywhere; white-space: pre-wrap; }
 .destaque { padding: clamp(1.15rem, 3vw, 1.9rem); background: var(--verde); color: #fff; border-radius: .9rem; }
-.destaque h2 { color: #d4ebd9; font-size: 1rem; letter-spacing: 0; }
-.destaque-hora { font-size: clamp(1.3rem, 3.5vw, 1.95rem); font-weight: 750; line-height: 1.2; }
+.destaque h2, .destaque .suave { color: #d4ebd9; }
+.destaque .visitas li { flex-wrap: wrap; gap: .35rem 1rem; }
 .visitas li { display: flex; gap: 1rem; border-top: 1px solid var(--borda); padding-block: .75rem; overflow-wrap: anywhere; }
 .visitas time { font-weight: 750; }
 .visitas p, .destaque p:last-child, .vazio p { margin-bottom: 0; }

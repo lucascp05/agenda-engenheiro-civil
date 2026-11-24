@@ -1,8 +1,8 @@
-import 'reflect-metadata';
-import { Transform, Type } from 'class-transformer';
-import { IsBoolean, IsDefined, IsIn, IsOptional, IsString, IsUrl, IsUUID, Length, Matches, ValidateNested } from 'class-validator';
+﻿import 'reflect-metadata';
+import { Transform } from 'class-transformer';
+import { IsBoolean, IsEmail, IsISO8601, IsIn, IsOptional, IsString, IsUrl, IsUUID, Length, Matches } from 'class-validator';
 
-export const servicos = ['Topografia', 'CAR', 'INCRA', 'Projetos', 'Não sei qual serviço preciso'];
+export const servicos = ['Topografia', 'CAR', 'INCRA', 'Serviços relacionados ao INCRA', 'Projetos', 'Não sei qual serviço preciso'];
 const trim = ({ value }: { value: unknown }) => typeof value === 'string' ? value.trim() : value;
 
 export function normalizarCelular(value: unknown) {
@@ -10,21 +10,39 @@ export function normalizarCelular(value: unknown) {
   return value.replace(/\D/g, '');
 }
 
+const celular = () => Matches(/^[1-9][0-9]9[0-9]{8}$/, { message: 'Informe o celular com DDD e 11 dígitos.' });
+
+export class EmailDto {
+  @Transform(({ value }) => typeof value === 'string' ? value.trim().toLowerCase() : value)
+  @IsEmail() @Length(3, 254)
+  email!: string;
+}
+
+export class CadastroDto extends EmailDto {
+  @Transform(trim) @IsString() @Length(2, 80)
+  nome!: string;
+}
+
 export class LoginDto {
-  @Transform(({value}) => normalizarCelular(value))
-  @Matches(/^[1-9][0-9]9[0-9]{8}$/, {message: 'Informe o celular com DDD e 11 dígitos.'})
-  celular!: string;
+  @IsOptional() @Transform(({ value }) => typeof value === 'string' ? value.trim().toLowerCase() : value)
+  @IsEmail() @Length(3, 254)
+  email?: string;
+
+  @IsOptional() @Transform(({ value }) => normalizarCelular(value)) @celular()
+  celular?: string;
 
   @IsString() @Length(8, 128, { message: 'Digite uma senha válida.' })
   senha!: string;
 }
 
-export class CadastroDto extends LoginDto {
-  @IsString() @Length(15, 128, { message: 'Escolha uma senha de 15 a 128 caracteres.' })
-  declare senha: string;
+export class TokenEmailDto {
+  @Matches(/^[a-f0-9]{64}$/)
+  token!: string;
+}
 
-  @Transform(trim) @IsString() @Length(2, 80)
-  nome!: string;
+export class SenhaEmailDto extends TokenEmailDto {
+  @IsString() @Length(15, 128, { message: 'Escolha uma senha de 15 a 128 caracteres.' })
+  senha!: string;
 }
 
 export const ufs = 'AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO'.split(' ');
@@ -50,29 +68,10 @@ export class PerfilProfissionalDto extends RegistroProfissionalDto {
   nomeCompleto!: string;
 }
 
-export class CadastroProfissionalDto extends CadastroDto {
-  @IsDefined() @ValidateNested() @Type(() => RegistroProfissionalDto)
-  registro!: RegistroProfissionalDto;
-}
-
-export class RevisaoProfissionalDto {
-  @IsIn(['APROVADO', 'REJEITADO'])
-  decisao!: 'APROVADO' | 'REJEITADO';
-
-  @IsBoolean()
-  dadosConferidos!: boolean;
-
-  @IsBoolean()
-  titularConfirmado!: boolean;
-
-  @IsOptional() @IsIn(['CONFEA', 'CREA'])
-  fonteOficial?: string;
-
-  @IsOptional() @IsIn(['CONTATO_INSTITUCIONAL', 'VERIFICACAO_PRESENCIAL', 'CONFIRMACAO_PELO_CREA'])
-  metodoIdentidade?: string;
-}
-
 export class PedidoDto {
+  @IsOptional() @Transform(({ value }) => normalizarCelular(value)) @celular()
+  celular?: string;
+
   @IsIn(servicos)
   servico!: string;
 
@@ -115,4 +114,10 @@ export class VisitaDto {
 
   @Matches(/^(?:[01]\d|2[0-3]):00$/)
   hora!: string;
+}
+
+
+export class RemarcacaoDto extends VisitaDto {
+  @IsISO8601({ strict: true })
+  horarioAnterior!: string;
 }

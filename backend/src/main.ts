@@ -10,15 +10,16 @@ import { JwtModule, JwtService } from '@nestjs/jwt';
 import { Papel, Prisma, Situacao } from '@prisma/client';
 import helmet from 'helmet';
 import { Db } from './db';
-import { CadastroDto, CadastroProfissionalDto, ConsentimentoDto, FiltrosDto, LoginDto, MensagemDto, PedidoDto, PerfilProfissionalDto, RevisaoProfissionalDto, VisitaDto } from './dto';
+import { Email } from './email';
+import { CadastroDto, EmailDto, FiltrosDto, LoginDto, MensagemDto, PedidoDto, PerfilProfissionalDto, SenhaEmailDto, TokenEmailDto, RemarcacaoDto, VisitaDto } from './dto';
 import { gerarHash, hashLegado, hashReserva, verificarSenha } from './senha';
 import { LimiteAcesso, type RespostaComCabecalho } from './limite-acesso';
 
-type Sessao = { sub: string; papel: Papel; id: string; profissionalAprovado: boolean };
+type Sessao = { sub: string; papel: Papel; id: string; profissionalAutorizado: boolean };
 type TokenSessao = { sub: string; jti: string; ver: number };
 const Usuario = createParamDecorator((_, contexto: ExecutionContext) =>
   contexto.switchToHttp().getRequest().usuario as Sessao);
-const contaPublica = { id: true, nome: true, celular: true, papel: true };
+const contaPublica = { id: true, nome: true, celular: true, email: true, papel: true };
 const dadosPedido = {
   cliente: { select: contaPublica },
   mensagens: { orderBy: { criadoEm: 'asc' } },
@@ -33,13 +34,13 @@ function exigirPapel(usuario: Sessao, papel: Papel) {
   if (usuario.papel !== papel) throw new ForbiddenException('Sua conta não tem acesso a esta ação.');
 }
 
-function exigirProfissionalAprovado(usuario: Sessao) {
+function exigirProfissional(usuario: Sessao) {
   exigirPapel(usuario, 'ENGENHEIRO');
-  if (!usuario.profissionalAprovado) throw new ForbiddenException('O painel fica disponível após a aprovação profissional.');
+  if (!usuario.profissionalAutorizado) throw new ForbiddenException('Esta conta não administra a agenda.');
 }
 
 function exigirAcessoAosPedidos(usuario: Sessao) {
-  if (usuario.papel !== 'CLIENTE') exigirProfissionalAprovado(usuario);
+  if (usuario.papel !== 'CLIENTE') exigirProfissional(usuario);
 }
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -49,6 +50,8 @@ if (publicacao && jwtSecret.startsWith('apenas-demo-local')) throw new Error('Co
 if (publicacao && new URL(process.env.DATABASE_URL ?? '').password === 'apenas-demo-local') {
   throw new Error('Configure uma senha própria para o PostgreSQL.');
 }
+const proprietario = process.env.AGENDA_OWNER_ID?.trim();
+const ehProprietario = (id: string, papel: Papel) => papel === 'ENGENHEIRO' && id === proprietario;
 const duracaoSessao = 8 * 60 * 60;
 
 @Injectable()
@@ -65,14 +68,15 @@ class Autenticacao implements CanActivate {
     const sessao = await this.db.sessaoAcesso.findUnique({
       where: { id: dados.jti },
       select: { contaId: true, expiraEm: true, conta: { select: {
-        papel: true, versaoSessao: true, perfilProfissional: { select: { situacao: true } },
+        papel: true, versaoSessao: true,
       } } },
     });
     if (!sessao || sessao.contaId !== dados.sub || sessao.expiraEm <= new Date() || sessao.conta.versaoSessao !== dados.ver) throw invalida();
-    req.usuario = {
+    const usuario: Sessao = {
       id: dados.jti, sub: sessao.contaId, papel: sessao.conta.papel,
-      profissionalAprovado: sessao.conta.perfilProfissional?.situacao === 'APROVADO',
+      profissionalAutorizado: ehProprietario(sessao.contaId, sessao.conta.papel),
     };
+    req.usuario = usuario;
     return true;
   }
 }
@@ -92,7 +96,7 @@ class LimitePorIp implements CanActivate {
 
 @Controller()
 class Acesso {
-  constructor(private db: Db, private jwt: JwtService, private limites: LimiteAcesso) {}
+  constructor(private db: Db, private jwt: JwtService, private limites: LimiteAcesso, private email: Email) {}
 
   @Get('saude')
   async saude() {
@@ -101,17 +105,30 @@ class Acesso {
   }
 
   @Post('auth/cadastro')
+  @HttpCode(202)
   @UseGuards(LimitePorIp)
   async cadastro(@Body() dados: CadastroDto, @Res({ passthrough: true }) res: RespostaComCabecalho) {
-    this.limites.consumir('cadastro-celular:' + dados.celular, 5, res);
+    this.limites.consumir('cadastro-email:' + dados.email, 5, res);
+    if (!await this.db.conta.count({ where: { email: dados.email } })) {
+      await this.email.enviar({ finalidade: 'CADASTRO', ...dados });
+    }
+    return { mensagem: 'Se o endereço puder ser cadastrado, você receberá um link para criar sua conta.' };
+  }
+
+  @Post('auth/confirmar-email')
+  @UseGuards(LimitePorIp)
+  async confirmarEmail(@Body() dados: SenhaEmailDto) {
     try {
-      const conta = await this.db.conta.create({
-        data: { nome: dados.nome, celular: dados.celular, hash: await gerarHash(dados.senha), papel: 'CLIENTE' },
-        select: contaPublica,
+      const conta = await this.db.$transaction(async tx => {
+        const registro = await this.email.consumir(tx, dados.token, 'CADASTRO');
+        return tx.conta.create({
+          data: { email: registro.email, nome: registro.nome!, hash: await gerarHash(dados.senha), papel: 'CLIENTE' },
+          select: contaPublica,
+        });
       });
       return this.sessao(conta, 0);
     } catch (erro) {
-      if (erroUnico(erro)) throw new ConflictException({ message: 'Entre com este celular ou procure ajuda para acessar a conta.', campos: { celular: 'Já existe uma conta com este celular.' } });
+      if (erroUnico(erro)) throw new ConflictException('Este link já não pode ser usado. Entre na sua conta.');
       throw erro;
     }
   }
@@ -119,32 +136,100 @@ class Acesso {
   @Post('auth/login')
   @UseGuards(LimitePorIp)
   async login(@Body() dados: LoginDto, @Res({ passthrough: true }) res: RespostaComCabecalho) {
-    this.limites.consumir('login-celular:' + dados.celular, 8, res);
-    const conta = await this.db.conta.findUnique({ where: { celular: dados.celular } });
+    const identificador = dados.email || dados.celular;
+    if (!identificador || (dados.email && dados.celular)) throw new BadRequestException('Informe um e-mail ou celular.');
+    this.limites.consumir('login-identificador:' + identificador, 8, res);
+    const conta = await this.db.conta.findUnique({ where: dados.email ? { email: dados.email } : { celular: dados.celular } });
     const valida = await verificarSenha(dados.senha, conta?.hash ?? hashReserva);
-    if (!conta || !valida) throw new UnauthorizedException('Celular ou senha incorretos.');
-    const { id, nome, celular, papel } = conta;
+    if (!conta || !valida) throw new UnauthorizedException('Dados de acesso incorretos.');
+    const { id, nome, celular, email, papel } = conta;
     if (hashLegado(conta.hash)) {
       await this.db.conta.updateMany({ where: { id, hash: conta.hash }, data: { hash: await gerarHash(dados.senha) } });
     }
-    return this.sessao({ id, nome, celular, papel }, conta.versaoSessao);
+    return this.sessao({ id, nome, celular, email, papel }, conta.versaoSessao);
   }
 
-  @Post('auth/cadastro-profissional')
-  @UseGuards(LimitePorIp)
-  async cadastroProfissional(@Body() dados: CadastroProfissionalDto, @Res({ passthrough: true }) res: RespostaComCabecalho) {
-    this.limites.consumir('cadastro-celular:' + dados.celular, 5, res);
+  @Post('auth/vincular-email')
+  @HttpCode(202)
+  @UseGuards(Autenticacao, LimitePorIp)
+  async vincularEmail(@Usuario() usuario: Sessao, @Body() dados: EmailDto, @Res({ passthrough: true }) res: RespostaComCabecalho) {
+    exigirAcessoAosPedidos(usuario);
+    this.limites.consumir('vinculo-conta:' + usuario.sub, 5, res);
+    this.limites.consumir('vinculo-email:' + dados.email, 5, res);
+    const conta = await this.db.conta.findUniqueOrThrow({ where: { id: usuario.sub } });
+    if (conta.email) throw new ConflictException('Esta conta já tem um e-mail vinculado.');
+    await this.email.enviar({ finalidade: 'VINCULO', email: dados.email, contaId: conta.id, versao: conta.versaoSessao });
+    return { mensagem: 'Enviamos o link. Abra-o no navegador em que sua conta está aberta.' };
+  }
+
+  @Post('auth/confirmar-vinculo')
+  @UseGuards(Autenticacao, LimitePorIp)
+  async confirmarVinculo(@Usuario() usuario: Sessao, @Body() dados: TokenEmailDto) {
+    exigirAcessoAosPedidos(usuario);
     try {
-      const conta = await this.db.conta.create({
-        data: {
-          nome: dados.nome, celular: dados.celular, hash: await gerarHash(dados.senha), papel: 'ENGENHEIRO',
-          perfilProfissional: { create: { ...dados.registro, nomeCompleto: dados.nome } },
-        },
-        select: contaPublica,
+      const conta = await this.db.$transaction(async tx => {
+        const registro = await this.email.consumir(tx, dados.token, 'VINCULO', usuario.sub);
+        const where = { id: usuario.sub, email: null, versaoSessao: registro.versao! };
+        if (!(await tx.conta.updateMany({ where, data: { email: registro.email } })).count) {
+          throw new ConflictException('Esta conta já tem um e-mail vinculado ou o link venceu.');
+        }
+        return tx.conta.findUniqueOrThrow({ where: { id: usuario.sub }, select: contaPublica });
       });
-      return this.sessao(conta, 0);
+      return { conta };
     } catch (erro) {
-      if (erroUnico(erro)) throw new ConflictException({ message: 'Já existe uma conta com este celular. Entre para continuar.', campos: { celular: 'Já existe uma conta com este celular.' } });
+      if (erroUnico(erro)) throw new ConflictException('Já existe uma conta com esse e-mail.');
+      throw erro;
+    }
+  }
+
+  @Post('auth/recuperacao')
+  @HttpCode(202)
+  @UseGuards(LimitePorIp)
+  async recuperacao(@Body() dados: EmailDto, @Res({ passthrough: true }) res: RespostaComCabecalho) {
+    this.limites.consumir('recuperacao-email:' + dados.email, 5, res);
+    const conta = await this.db.conta.findUnique({ where: { email: dados.email } });
+    if (conta) {
+      await this.email.enviar({ finalidade: 'RECUPERACAO', email: dados.email, contaId: conta.id, versao: conta.versaoSessao })
+        .catch(() => console.warn('Não foi possível enviar um e-mail de recuperação.'));
+    }
+    return { mensagem: 'Se houver uma conta com esse e-mail, você receberá um link para redefinir a senha.' };
+  }
+
+  @Post('auth/redefinir-senha')
+  @HttpCode(204)
+  @UseGuards(LimitePorIp)
+  async redefinirSenha(@Body() dados: SenhaEmailDto) {
+    await this.db.$transaction(async tx => {
+      const registro = await this.email.consumir(tx, dados.token, 'RECUPERACAO');
+      const where = { id: registro.contaId!, email: registro.email, versaoSessao: registro.versao! };
+      const resultado = await tx.conta.updateMany({
+        where, data: { hash: await gerarHash(dados.senha), versaoSessao: { increment: 1 } },
+      });
+      if (!resultado.count) throw new BadRequestException('Link inválido ou vencido. Solicite um novo e-mail.');
+      await tx.sessaoAcesso.deleteMany({ where: { contaId: registro.contaId! } });
+    });
+  }
+
+  @Post('auth/ativar-profissional')
+  @HttpCode(204)
+  @UseGuards(LimitePorIp)
+  async ativarProfissional(@Body() dados: SenhaEmailDto) {
+    if (!proprietario) throw new ForbiddenException('Área profissional indisponível.');
+    try {
+      await this.db.$transaction(async tx => {
+        const registro = await this.email.consumir(tx, dados.token, 'PROPRIETARIO', proprietario);
+        const resultado = await tx.conta.updateMany({
+          where: {
+            id: proprietario, papel: 'ENGENHEIRO', versaoSessao: registro.versao!,
+            OR: [{ email: null }, { email: registro.email }],
+          },
+          data: { email: registro.email, hash: await gerarHash(dados.senha), versaoSessao: { increment: 1 } },
+        });
+        if (!resultado.count) throw new BadRequestException('Convite inválido ou vencido.');
+        await tx.sessaoAcesso.deleteMany({ where: { contaId: proprietario } });
+      });
+    } catch (erro) {
+      if (erroUnico(erro)) throw new ConflictException('Este e-mail já pertence a outra conta.');
       throw erro;
     }
   }
@@ -156,21 +241,20 @@ class Acesso {
     await this.db.sessaoAcesso.deleteMany({ where: { id: usuario.id, contaId: usuario.sub } });
   }
 
-  private async sessao(conta: { id: string; nome: string; celular: string; papel: Papel }, ver: number) {
+  private async sessao(conta: { id: string; nome: string; celular: string | null; email: string | null; papel: Papel }, ver: number) {
     const agora = new Date();
     const expiraEm = new Date(agora.getTime() + duracaoSessao * 1000);
     const [, { id }] = await this.db.$transaction([
       this.db.sessaoAcesso.deleteMany({ where: { expiraEm: { lte: agora } } }),
       this.db.sessaoAcesso.create({ data: { contaId: conta.id, expiraEm }, select: { id: true } }),
     ]);
-    return { conta, expiraEm, token: await this.jwt.signAsync({ sub: conta.id, jti: id, ver }) };
+    return { conta: { ...conta, profissional: ehProprietario(conta.id, conta.papel) }, expiraEm, token: await this.jwt.signAsync({ sub: conta.id, jti: id, ver }) };
   }
 }
 
 const dadosRegistro = {
-  nomeCompleto: true, titulo: true, creaUf: true, registro: true, revisadoEm: true,
+  nomeCompleto: true, titulo: true, creaUf: true, registro: true, autorizaPublicacao: true,
 } satisfies Prisma.PerfilProfissionalSelect;
-const dadosSolicitacao = { ...dadosRegistro, situacao: true, autorizaPublicacao: true, criadoEm: true };
 
 @Controller('profissionais')
 class ProfissionaisController {
@@ -178,82 +262,31 @@ class ProfissionaisController {
 
   @Get('publico')
   async publico() {
-    const perfil = await this.db.perfilProfissional.findFirst({
-      where: { situacao: 'APROVADO', autorizaPublicacao: true },
-      select: dadosRegistro,
-    });
+    const perfil = proprietario ? await this.db.perfilProfissional.findFirst({
+      where: { contaId: proprietario, conta: { papel: 'ENGENHEIRO' }, autorizaPublicacao: true },
+      select: { nomeCompleto: true, titulo: true, creaUf: true, registro: true },
+    }) : null;
     return { perfil };
   }
 
   @Get('meu-perfil')
   @UseGuards(Autenticacao)
   async meuPerfil(@Usuario() usuario: Sessao) {
-    exigirPapel(usuario, 'ENGENHEIRO');
+    exigirProfissional(usuario);
     const perfil = await this.db.perfilProfissional.findUnique({
-      where: { contaId: usuario.sub }, select: dadosSolicitacao,
+      where: { contaId: usuario.sub }, select: dadosRegistro,
     });
     return { perfil };
   }
 
   @Post('meu-perfil')
   @UseGuards(Autenticacao)
-  async solicitar(@Usuario() usuario: Sessao, @Body() dados: PerfilProfissionalDto) {
-    exigirPapel(usuario, 'ENGENHEIRO');
-    try {
-      return await this.db.perfilProfissional.create({
-        data: { ...dados, contaId: usuario.sub }, select: dadosSolicitacao,
-      });
-    } catch (erro) {
-      if (erroUnico(erro)) throw new ConflictException('Esta conta já tem uma solicitação de verificação.');
-      throw erro;
-    }
-  }
-
-  @Post('meu-perfil/publicacao')
-  @UseGuards(Autenticacao)
-  async consentimento(@Usuario() usuario: Sessao, @Body() dados: ConsentimentoDto) {
-    exigirPapel(usuario, 'ENGENHEIRO');
-    const where = { contaId: usuario.sub };
-    const resultado = await this.db.perfilProfissional.updateMany({ where, data: dados });
-    if (!resultado.count) throw new NotFoundException('Envie sua solicitação de verificação primeiro.');
-    return this.db.perfilProfissional.findUniqueOrThrow({ where, select: dadosSolicitacao });
-  }
-
-  @Get('revisao')
-  @UseGuards(Autenticacao)
-  listarRevisoes(@Usuario() usuario: Sessao) {
-    exigirPapel(usuario, 'ADMIN');
-    return this.db.perfilProfissional.findMany({
-      orderBy: [{ situacao: 'asc' }, { criadoEm: 'asc' }],
-      select: { ...dadosSolicitacao, contaId: true, conta: { select: { celular: true } },
-        revisor: { select: { nome: true } }, fonteOficial: true, metodoIdentidade: true },
+  async salvarPerfil(@Usuario() usuario: Sessao, @Body() dados: PerfilProfissionalDto) {
+    exigirProfissional(usuario);
+    return this.db.perfilProfissional.upsert({
+      where: { contaId: usuario.sub }, create: { ...dados, contaId: usuario.sub },
+      update: dados, select: dadosRegistro,
     });
-  }
-
-  @Post('revisao/:id')
-  @UseGuards(Autenticacao)
-  async revisar(@Usuario() usuario: Sessao, @Param('id', ParseUUIDPipe) id: string, @Body() dados: RevisaoProfissionalDto) {
-    exigirPapel(usuario, 'ADMIN');
-    if (usuario.sub === id) throw new ForbiddenException('A revisão exige outra conta autorizada.');
-    const aprovar = dados.decisao === 'APROVADO';
-    if (aprovar && (!dados.dadosConferidos || !dados.titularConfirmado || !dados.fonteOficial || !dados.metodoIdentidade)) {
-      throw new BadRequestException('Confirme o registro na fonte oficial e a identidade por um canal independente.');
-    }
-    try {
-      const resultado = await this.db.perfilProfissional.updateMany({
-        where: { contaId: id, situacao: 'EM_ANALISE', conta: { papel: 'ENGENHEIRO' } },
-        data: {
-          situacao: dados.decisao, revisorId: usuario.sub, revisadoEm: new Date(),
-          fonteOficial: aprovar ? dados.fonteOficial : null,
-          metodoIdentidade: aprovar ? dados.metodoIdentidade : null,
-        },
-      });
-      if (!resultado.count) throw new ConflictException('A solicitação já foi revisada ou está indisponível.');
-      return { situacao: dados.decisao };
-    } catch (erro) {
-      if (erroUnico(erro)) throw new ConflictException('Já há um profissional aprovado para esta agenda compartilhada.');
-      throw erro;
-    }
   }
 }
 
@@ -287,7 +320,7 @@ class PedidosService {
     return this.db.pedido.create({ data: { ...dados, clienteId: usuario.sub }, include: dadosPedido });
   }
 
-  async alterar(usuario: Sessao, id: string, destino: Situacao, origens: Situacao[], texto?: string, horario?: Date) {
+  async alterar(usuario: Sessao, id: string, destino: Situacao, origens: Situacao[], texto?: string, horario?: Date, horarioAnterior?: Date) {
     try {
       return await this.db.$transaction(async tx => {
         const where = { id, clienteId: usuario.papel === 'CLIENTE' ? usuario.sub : undefined };
@@ -300,7 +333,12 @@ class PedidosService {
           throw new ConflictException('A situação do pedido mudou. Atualize a lista e tente novamente.');
         }
         if (texto) await tx.mensagem.create({ data: { pedidoId: id, autor: usuario.papel, texto } });
-        if (horario) await tx.visita.create({ data: { pedidoId: id, horario } });
+        if (horario && horarioAnterior) {
+          const visita = await tx.visita.updateMany({ where: { pedidoId: id, horario: horarioAnterior }, data: { horario } });
+          if (!visita.count) throw new ConflictException('A visita mudou. Atualize a lista e tente novamente.');
+        } else if (horario) {
+          await tx.visita.create({ data: { pedidoId: id, horario } });
+        }
         return tx.pedido.findUniqueOrThrow({ where: { id }, include: dadosPedido });
       });
     } catch (erro) {
@@ -313,7 +351,7 @@ class PedidosService {
     return this.db.visita.findMany({
       where: { pedido: { situacao: 'MARCADO' } },
       orderBy: { horario: 'asc' },
-      include: { pedido: { select: { id: true, municipio: true, comunidade: true, local: true, cliente: { select: { nome: true } } } } },
+      include: { pedido: { select: { id: true, servico: true, municipio: true, comunidade: true, local: true, cliente: { select: { nome: true } } } } },
     });
   }
 }
@@ -342,7 +380,7 @@ class PedidosController {
 
   @Post(':id/informacoes')
   informar(@Usuario() usuario: Sessao, @Param('id', ParseUUIDPipe) id: string, @Body() dados: MensagemDto) {
-    exigirProfissionalAprovado(usuario);
+    exigirProfissional(usuario);
     return this.pedidos.alterar(usuario, id, 'INFORMACOES', ['RECEBIDO','INFORMACOES'], dados.texto);
   }
 
@@ -354,7 +392,7 @@ class PedidosController {
 
   @Post(':id/conclusao')
   concluir(@Usuario() usuario: Sessao, @Param('id', ParseUUIDPipe) id: string) {
-    exigirProfissionalAprovado(usuario);
+    exigirProfissional(usuario);
     return this.pedidos.alterar(usuario, id, 'CONCLUIDO', ['RECEBIDO','INFORMACOES','MARCADO']);
   }
 }
@@ -370,17 +408,27 @@ class VisitasController {
 
   @Post()
   marcar(@Usuario() usuario: Sessao, @Body() dados: VisitaDto) {
-    exigirProfissionalAprovado(usuario);
+    exigirProfissional(usuario);
+    return this.pedidos.alterar(usuario, dados.pedidoId, 'MARCADO', ['RECEBIDO','INFORMACOES'], undefined, this.horario(dados));
+  }
+
+  @Post('remarcacao')
+  remarcar(@Usuario() usuario: Sessao, @Body() dados: RemarcacaoDto) {
+    exigirProfissional(usuario);
+    return this.pedidos.alterar(usuario, dados.pedidoId, 'MARCADO', ['MARCADO'], undefined, this.horario(dados), new Date(dados.horarioAnterior));
+  }
+
+  private horario(dados: VisitaDto) {
     const horario = new Date(dados.dia + 'T' + dados.hora + ':00-03:00');
     if (isNaN(horario.getTime()) || diaBrasilia.format(horario) !== dados.dia || horaBrasilia.format(horario) !== dados.hora || horario <= new Date()) {
       throw new BadRequestException({ message: 'Escolha um horário futuro no fuso de Brasília.', campos: { dia: 'Escolha uma data e um horário futuros.' } });
     }
-    return this.pedidos.alterar(usuario, dados.pedidoId, 'MARCADO', ['RECEBIDO','INFORMACOES'], undefined, horario);
+    return horario;
   }
 
   @Get()
   listar(@Usuario() usuario: Sessao) {
-    exigirProfissionalAprovado(usuario);
+    exigirProfissional(usuario);
     return this.pedidos.visitas();
   }
 }
@@ -392,7 +440,7 @@ class VisitasController {
     verifyOptions: { algorithms: ['HS256'], issuer: 'agenda-api', audience: 'agenda-web' },
   })],
   controllers: [Acesso, PedidosController, VisitasController, ProfissionaisController],
-  providers: [Db, Autenticacao, LimiteAcesso, LimitePorIp, PedidosService],
+  providers: [Db, Autenticacao, LimiteAcesso, LimitePorIp, PedidosService, Email],
 })
 class App {}
 
