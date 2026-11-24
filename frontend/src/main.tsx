@@ -14,6 +14,7 @@ type Pedido = Lugar & {
 type Visita = { id: string; horario: string; pedido: Lugar & { cliente: { nome: string } } };
 type FalhaDados = { message?: string; campos?: Record<string, string> };
 const apiUrl = (import.meta.env.VITE_API_URL || 'http://localhost:3000').replace(/\/$/, '');
+const acessoProfissionalLegado = import.meta.env.VITE_ACESSO_PROFISSIONAL_LEGADO === '1';
 const rotulos: Record<Situacao, string> = {
   RECEBIDO: 'Pedido recebido', INFORMACOES: 'Precisamos de informações',
   MARCADO: 'Visita marcada', CONCLUIDO: 'Concluído',
@@ -159,6 +160,7 @@ const situacoesProfissionais: Record<EstadoProfissional, string> = {
 function Capa({ pedir, acompanhar }: { pedir: () => void; acompanhar: () => void }) {
   const [perfil, setPerfil] = useState<RegistroPublico | null>(null);
   useEffect(() => {
+    if (acessoProfissionalLegado) return;
     const controller = new AbortController();
     void api<{ perfil: RegistroPublico | null }>('/profissionais/publico', undefined, undefined, controller.signal)
       .then(({ perfil }) => setPerfil(perfil)).catch(() => {});
@@ -340,7 +342,7 @@ function App() {
   const [sessao, setSessao] = useState(lerSessao);
   const [tela, setTela] = useState<Tela>(() => {
     if (sessao?.conta.papel === 'ADMIN') return 'revisao';
-    if (sessao?.conta.papel === 'ENGENHEIRO') return 'situacao-profissional';
+    if (sessao?.conta.papel === 'ENGENHEIRO') return acessoProfissionalLegado ? 'agenda' : 'situacao-profissional';
     return 'inicio';
   });
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
@@ -358,7 +360,7 @@ function App() {
   const cliente = sessao?.conta.papel === 'CLIENTE';
   const profissional = sessao?.conta.papel === 'ENGENHEIRO';
   const admin = sessao?.conta.papel === 'ADMIN';
-  const engenheiro = profissional && perfil?.situacao === 'APROVADO';
+  const engenheiro = profissional && (acessoProfissionalLegado || perfil?.situacao === 'APROVADO');
 
   function limparSessao(expirada = false) {
     const destino = profissional || admin ? 'acesso-profissional' : tela === 'novo' ? 'novo' : 'pedidos';
@@ -435,7 +437,7 @@ function App() {
     setFiltros('');
     sessionStorage.setItem('agenda.sessao', JSON.stringify(nova));
     setSessao(nova);
-    if (nova.conta.papel === 'ENGENHEIRO') ir('situacao-profissional');
+    if (nova.conta.papel === 'ENGENHEIRO') ir(acessoProfissionalLegado ? 'agenda' : 'situacao-profissional');
     else if (nova.conta.papel === 'ADMIN') ir('revisao');
     else if (tela === 'acesso-profissional') setAcessoNegado(true);
     else window.scrollTo(0, 0);
@@ -463,7 +465,7 @@ function App() {
   const demais = pedidos.filter(pedido => pedido.situacao !== 'RECEBIDO');
 
   function abrirAreaProfissional() {
-    ir(admin ? 'revisao' : profissional ? 'situacao-profissional' : 'profissional');
+    ir(admin ? 'revisao' : profissional ? acessoProfissionalLegado ? 'agenda' : 'situacao-profissional' : 'profissional');
   }
 
   return <>
@@ -483,8 +485,8 @@ function App() {
       {aviso && <p className="aviso" role="status">{aviso}</p>}
       {tela === 'inicio' && <Capa pedir={() => !sessao || cliente ? ir('novo') : abrirAreaProfissional()} acompanhar={() => !sessao || cliente ? ir('pedidos') : abrirAreaProfissional()}/>}
       {tela === 'profissional' && <section className="painel estreito">
-        <h1>Área do profissional</h1><p>Entre para acompanhar sua verificação ou solicite um cadastro.</p>
-        <div className="acoes"><button className="primario" onClick={() => ir('acesso-profissional')}>Entrar como profissional</button><button className="secundario" onClick={() => ir('cadastro-profissional')}>Solicitar cadastro profissional</button></div>
+        <h1>Área do profissional</h1><p>{acessoProfissionalLegado ? 'Entre com sua conta profissional para acessar o painel.' : 'Entre para acompanhar sua verificação ou solicite um cadastro.'}</p>
+        <div className="acoes"><button className="primario" onClick={() => ir('acesso-profissional')}>Entrar como profissional</button>{!acessoProfissionalLegado && <button className="secundario" onClick={() => ir('cadastro-profissional')}>Solicitar cadastro profissional</button>}</div>
       </section>}
       {tela === 'acesso-profissional' && <Acesso key={tela} profissional entrar={entrar} negado={acessoNegado} irParaPedidos={() => ir('pedidos')}/>}
       {(tela === 'cadastro-profissional' || (tela === 'verificar-conta' && profissional)) && <FormularioProfissional
