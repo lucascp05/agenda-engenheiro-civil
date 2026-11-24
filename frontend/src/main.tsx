@@ -167,8 +167,8 @@ function Capa({ pedir, acompanhar }: { pedir: () => void; acompanhar: () => void
   return <>
     <section className="hero">
       <div className="hero-conteudo">
-        <h1>Solicite uma visita técnica</h1>
-        <p>Conte o que você precisa e acompanhe por aqui quando a visita for marcada.</p>
+        <h1>Topografia e engenharia civil</h1>
+        <p>Solicite atendimento para seu imóvel e acompanhe a confirmação da visita por aqui.</p>
         <div className="acoes"><button className="primario" onClick={pedir}>Pedir atendimento</button><button className="secundario" onClick={acompanhar}>Acompanhar meu pedido</button></div>
       </div>
       <picture className="hero-foto">
@@ -178,21 +178,23 @@ function Capa({ pedir, acompanhar }: { pedir: () => void; acompanhar: () => void
     </section>
     <section className="secao-capa">
       <h2>Serviços</h2>
-      <div className="servicos">{servicosCapa.map(([nome, descricao]) => <article key={nome}><h3>{nome}</h3><p>{descricao}</p></article>)}</div>
+      <div className="servicos">{servicosCapa.map(([nome, descricao]) => <article key={nome} className={nome === 'Topografia' ? 'servico-principal' : undefined}><h3>{nome}</h3><p>{descricao}</p></article>)}</div>
     </section>
-    {perfil && <section className="secao-capa painel quem-atende">
+    <section className="secao-capa painel quem-atende">
       <h2>Quem atende</h2>
       <div className="identidade-profissional">
         <div>
-          <h3>{perfil.nomeCompleto}</h3>
-          <p className="titulo-profissional">{perfil.titulo}</p>
-          <p className="registro-profissional">CREA-{perfil.creaUf} <strong>{perfil.registro}</strong></p>
+          <h3>Tatico Assis</h3>
+          {perfil && <>
+            <p className="titulo-profissional">{perfil.nomeCompleto} · {perfil.titulo}</p>
+            <p className="registro-profissional">CREA-{perfil.creaUf} <strong>{perfil.registro}</strong></p>
+          </>}
         </div>
-        <div className="consulta-profissional">
+        {perfil && <div className="consulta-profissional">
           <a className="secundario" href={consultaOficial} target="_blank" rel="noreferrer">Consultar registro no Confea</a>
-        </div>
+        </div>}
       </div>
-    </section>}
+    </section>
     <section className="secao-capa">
       <h2>Como funciona</h2>
       <ol className="fluxo">{etapas.map(([titulo, descricao]) => <li key={titulo}><h3>{titulo}</h3><p>{descricao}</p></li>)}</ol>
@@ -489,7 +491,11 @@ function App() {
 
   return <>
     <header className="topo"><div className="limite barra">
-      <button className="marca" onClick={() => ir('inicio')}><span aria-hidden="true">⌖</span> <strong>Agenda do<br className="marca-quebra"/> Engenheiro Civil</strong></button>
+      <button className="marca" onClick={() => ir('inicio')}>
+        <img src="/tatico-assis-simbolo.png" alt="" width="40" height="46"/>
+        <strong>Tatico Assis</strong>
+        <span>Eng. Civil Especialista</span>
+      </button>
       <nav aria-label="Navegação principal">
         {!sessao && <>
           <button onClick={() => ir(tela === 'novo' ? 'novo' : 'pedidos')}>Entrar</button>
@@ -574,7 +580,7 @@ function App() {
       </>}
     </main>
     <footer className="limite rodape">
-      <span>Agenda do Engenheiro Civil</span>
+      <span>Tatico Assis</span>
       <a href="#area-profissional" onClick={evento => { evento.preventDefault(); abrirAreaProfissional(); }}>Área do profissional</a>
     </footer>
   </>;
