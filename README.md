@@ -4,7 +4,9 @@ Projeto final individual de Sistemas Distribuídos da UFERSA, de **Lucas Assis d
 
 ## Executar com Docker Compose
 
-Com Docker e Compose disponíveis, copie `.env.example` para `.env` na raiz. No PowerShell, use `Copy-Item .env.example .env`. Em Linux, use `cp .env.example .env`.
+Com Docker e Compose disponíveis, copie `.env.example` para `.env` na raiz. No PowerShell, use `Copy-Item .env.example .env`. Em Linux, use `cp .env.example .env`. Preencha `POSTGRES_PASSWORD` com uma senha própria usando caracteres seguros para URL e `JWT_SECRET` com um valor aleatório de pelo menos 32 caracteres.
+
+Para provisionar uma conta local de demonstração do engenheiro, preencha `ENGINEER_NAME`, `ENGINEER_PHONE` (celular de teste com DDD) e `ENGINEER_PASSWORD` (uma senha de 8 a 128 caracteres escolhida para a demonstração) no seu `.env`. Esse arquivo é ignorado pelo Git. Após subir os serviços, o comando `seed` cria ou atualiza a conta do engenheiro para esse celular. Se o número já pertence a um cliente, use outro número. Para trocar a senha, edite seu `.env`, execute novamente os dois comandos e entre com a nova senha.
 
 ```sh
 docker compose up -d --build --wait
@@ -13,10 +15,11 @@ docker compose exec api npm run seed
 
 Abra [o frontend local](http://localhost:8080). A API está em [localhost:3000](http://localhost:3000/saude). A API aplica as migrações versionadas na inicialização e o PostgreSQL fica na rede interna do Compose.
 
-Cadastre um cliente fictício pela interface. Use, por exemplo, **Ana Demo**, **(84) 99900-0010** e uma senha de demonstração com pelo menos oito caracteres. Para o engenheiro, use o celular e a senha definidos no seu `.env`. O comando `seed` cria ou atualiza a conta de engenheiro para o número configurado e recusa se o número já for de um cliente. Use janelas ou perfis separados para manter ambas as sessões abertas durante a demonstração.
+Na capa, escolha **Pedir uma visita** ou **Acompanhar meu pedido** para criar ou acessar uma conta de cliente. Para abrir o painel, escolha **Área do engenheiro** e entre com a conta provisionada. Use dois perfis de navegador ou uma janela comum e outra privada para manter as duas sessões abertas.
 
 ```sh
 docker compose exec -e TEST_API_URL=http://localhost:3000 api npm test
+docker compose exec api npm run test:seguranca
 docker compose down
 ```
 
@@ -46,7 +49,19 @@ flowchart LR
   B -- "SQL e transações" --> C
 ```
 
-O navegador guarda o JWT na sessão da aba e envia o token no cabeçalho `Authorization: Bearer`. A senha é derivada com scrypt e sal por conta. A API aplica as permissões de acordo com o papel autenticado e filtra os pedidos de cliente pelo identificador da conta.
+O navegador guarda o JWT na sessão da aba e envia o token no cabeçalho `Authorization: Bearer`. A API verifica assinatura, validade, sessão ativa e papel atual no PostgreSQL. A sessão vence após oito horas. **Sair** revoga a sessão da aba no servidor. Uma redefinição do engenheiro pelo `seed` encerra as sessões anteriores dessa conta.
+
+O cadastro cria somente contas de cliente e exige uma senha de 15 a 128 caracteres. A API usa scrypt com sal aleatório por senha, com custo `N=32768`, `r=8` e `p=3`. Contas antigas seguem podendo entrar, e o hash anterior é atualizado após autenticação. Somente a conta proprietária e a conta de engenheiro podem consultar um pedido.
+
+Os limites de autenticação usam janelas de 15 minutos na instância da API. O login aceita até 30 tentativas por IP e 8 por celular. O cadastro aceita 12 por IP e 5 por celular. O telefone é normalizado para aplicar o limite. Em caso de limite, a API retorna HTTP 429 com `Retry-After`. Esses contadores são locais ao processo e são zerados no reinício. A publicação pressupõe uma instância da API atrás do Caddy.
+
+A mensagem de cadastro duplicado revela que o número tem conta. A limitação reduz consultas repetidas. Quando a verificação de posse estiver pronta, mostre essa orientação específica somente após confirmar o número. Na atualização de uma versão anterior a esta migração, peça aos usuários que entrem novamente para criar uma sessão revogável.
+
+### Recuperação de conta
+
+**Preciso de ajuda para entrar** orienta o cliente a procurar o engenheiro pelo canal que já usa. O cadastro atual valida o formato do número. A posse do celular ainda precisa ser verificada.
+
+Para implementar a recuperação, cadastre um canal verificado e confirme a posse do celular no cadastro com um código de uso único. No pedido de recuperação, dê a mesma resposta para números existentes e inexistentes, limite tentativas e envie um código de curta validade ao canal verificado. Após o código válido, solicite uma nova senha e revogue todas as sessões anteriores. Se o cliente perdeu o número, use uma verificação independente e acordada com ele antes de mudar a conta. Saber o número, o nome ou os detalhes de um pedido é insuficiente para autorizar a troca.
 
 A API recebe dia e hora no fuso de Brasília, aceita somente o início de cada hora e persiste o instante em PostgreSQL. O frontend exibe o mesmo instante em `America/Sao_Paulo`. O agendamento altera a situação e cria a visita em uma única transação. A atualização do pedido exige uma situação válida no banco e o índice único de horário faz uma tentativa concorrente perder com HTTP 409. A perda desfaz a alteração daquele pedido. Há também um índice único por pedido. A conclusão mantém o histórico da visita e a retira da lista de confirmadas.
 
@@ -56,6 +71,7 @@ A API recebe dia e hora no fuso de Brasília, aceita somente o início de cada h
 | --- | --- |
 | `GET /saude` | Público. Verifica a conexão com o banco. |
 | `POST /auth/cadastro`, `POST /auth/login` | Público. O cadastro cria conta de cliente. |
+| `POST /auth/sair` | Conta autenticada. Revoga a sessão atual. |
 | `POST /pedidos` | Cliente autenticado. |
 | `GET /pedidos`, `GET /pedidos/:id` | Cliente consulta os próprios pedidos. Engenheiro consulta todos e pode filtrar a lista por `municipio` e `comunidade`. |
 | `POST /pedidos/:id/informacoes` | Engenheiro. Envia `{ "texto": "..." }`. |
@@ -68,7 +84,7 @@ A API recebe dia e hora no fuso de Brasília, aceita somente o início de cada h
 
 O Compose de publicação foi preparado para um host Linux com Docker Compose e acesso autorizado à zona DNS. Antes de apontar qualquer domínio, inventarie os registros existentes e valide com o responsável qual infraestrutura serve cada nome. Preserve as entradas das avaliações anteriores. Em uma instância autorizada, use um endpoint estável e libere 80 e 443 no grupo de segurança. Restrinja o acesso administrativo e mantenha o PostgreSQL na rede interna.
 
-No `.env` do host, use segredos próprios e ajuste:
+No `.env` do host, use segredos próprios e uma senha de engenheiro com pelo menos 15 caracteres. A API publicada aceita como origem de navegador apenas o endereço HTTPS do site. Ajuste:
 
 ```dotenv
 SITE_DOMAIN=lucas.grupo-04.sd.ufersa.dev.br
