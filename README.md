@@ -100,7 +100,7 @@ curl -fsS https://api.lucas.grupo-04.sd.ufersa.dev.br/saude
 
 Na versão acadêmica, o cadastro e a recuperação por e-mail ficam indisponíveis enquanto o envio estiver sem configuração. As duas contas fictícias são provisionadas pelo operador, fora do cadastro público. O procedimento não verifica nem vincula endereços de e-mail.
 
-1. O operador mantém as duas senhas distintas no arquivo privado `/opt/agenda/.demonstracao.env` da EC2. Em uma sessão administrativa já autorizada, carregue o arquivo com `set -a; . /opt/agenda/.demonstracao.env; set +a` e execute `docker exec -e DEMO_CLIENTE_A_SENHA -e DEMO_CLIENTE_B_SENHA agenda-api-1 npm run seed:demonstracao`. O comando cria somente as contas fictícias de cliente. Transmita as senhas aos participantes por um canal privado.
+1. As contas já estão provisionadas. Antes da apresentação, obtenha as senhas correspondentes no arquivo privado `/opt/agenda/.demonstracao.env`, em um terminal administrativo autorizado da EC2, sem compartilhar a tela. Se for necessário reprovisionar, carregue o arquivo com `set -a; . /opt/agenda/.demonstracao.env; set +a` e execute `docker exec -e DEMO_CLIENTE_A_SENHA -e DEMO_CLIENTE_B_SENHA agenda-api-1 npm run seed:demonstracao`. O comando cria somente as contas fictícias de cliente.
 2. Em dois perfis de navegador, abra **Entrar** → **Já tenho conta por celular**. Use `11900000001` para o cliente A e `11900000002` para o cliente B, cada um com a senha correspondente.
 3. Em um terceiro perfil, o titular abre **Área do profissional** → **Já tenho conta por celular** e usa as próprias credenciais. Se já vinculou um e-mail verificado, pode usá-lo para entrar. Após a demonstração, saia das três sessões.
 
@@ -125,6 +125,15 @@ Exemplo de corpo para `POST /pedidos`. O link do mapa pode ser omitido.
 }
 ```
 
-Na conferência de 24/11/2026, o Route 53 mostrou dois registros A com TTL de 60 segundos apontando para o IP elástico `50.16.228.161`. Na EC2, o Caddy ativo encaminhou o site para `web:8080` e a API para `api:3000`. O site e `GET /saude` responderam **200** por HTTPS. `GET /pedidos` e `GET /visitas` sem sessão devolveram **401**.
+### Evidências da publicação acadêmica
 
-A publicação tinha duas revisões. Os arquivos da API corresponderam a `f9da5d8`. Os arquivos da interface corresponderam à versão de compatibilidade incorporada em `f9daf4d`, servida pela imagem `agenda-visual:20261124T063449Z`. O fluxo autenticado em produção ainda precisa ser conferido com contas autorizadas. Na execução local da `origin/main`, o navegador registrou **201** nos dois envios e **200** ao recarregar os pedidos. A suíte confirmou os bloqueios **401**, **403** e **404**. Use a execução local com dados fictícios se o fluxo público ainda estiver pendente no dia da apresentação.
+A versão `a48546ed28def5ef9761067ae9f529b22b17e05c` foi publicada em 24/11/2026. As imagens de interface e API informam o mesmo SHA. O PostgreSQL recebeu backup antes da migração, e as contagens de contas, pedidos e visitas foram comparadas antes de criar as contas fictícias.
+
+| Critério | Verificação |
+| --- | --- |
+| Três camadas | A EC2 serve o React e executa NestJS e PostgreSQL em serviços separados. O React chama `POST /pedidos` em `frontend/src/main.tsx`, o NestJS autoriza e persiste em `backend/src/main.ts` e Prisma usa os modelos de `backend/prisma/schema.prisma`. O pedido criado pela API pública foi conferido na tabela `Pedido` do PostgreSQL. |
+| API HTTP | Por HTTPS, `POST /pedidos` devolveu **201** com `{"servico":"Topografia","situacao":"RECEBIDO"}` no recorte da resposta. O pedido fictício usa a referência “Porteira laranja - teste academico 27/11”. |
+| DNS | O Route 53 tem dois registros A com TTL de 60 segundos para `50.16.228.161`. O Caddy encaminha os domínios a `web:8080` e `api:3000`. O site e `GET /saude` passaram em HTTPS com **200**. |
+| Autenticação e autorização | As duas contas fictícias fizeram login com **201**. A API pública devolveu **401** sem sessão, **403** em `POST /visitas` por um cliente e **404** ao tentar ler o pedido com o segundo cliente. O agendamento pelo titular no ambiente público aguarda sua sessão. |
+
+No Chrome, a capa foi conferida em 390 e 1440 pixels. Sem remetente configurado, cadastro e recuperação mostram o aviso de indisponibilidade, e a API devolve **503** em ambos.
