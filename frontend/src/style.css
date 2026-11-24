@@ -82,6 +82,7 @@ h3 { font-size: 1.07rem; }
 .secundario:hover { background: #fff1e7; }
 .texto { padding-inline: .65rem; text-decoration: underline; text-underline-offset: .18em; }
 .alternar-acesso { margin-top: .6rem; }
+.voltar-acesso { min-height: 44px; margin-bottom: .5rem; }
 fieldset { padding: 0; border: 0; margin: 0; min-width: 0; display: grid; gap: 1rem; }
 fieldset > button { justify-self: stretch; }
 .campo { display: grid; gap: .32rem; font-weight: 680; font-size: .95rem; min-width: 0; }
