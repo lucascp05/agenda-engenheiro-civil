@@ -21,7 +21,8 @@ test('migração preserva dados e o convite libera somente o titular', {timeout:
   const dono = randomUUID(), cliente = randomUUID(), outro = randomUUID(), admin = randomUUID();
   const pedido = randomUUID(), visita = randomUUID();
   const horario = new Date('2031-02-03T15:00:00Z');
-  const env = {...process.env, DATABASE_URL:url.href, AGENDA_OWNER_ID:dono, AGENDA_PUBLICACAO:'0'};
+  const email = 'dono@example.test';
+  const env = {...process.env, DATABASE_URL:url.href, AGENDA_OWNER_ID:dono, AGENDA_OWNER_EMAIL:email, AGENDA_PUBLICACAO:'0'};
   const db = new PrismaClient({datasourceUrl:url.href});
   const anterior = mkdtempSync(join(tmpdir(), 'agenda-prisma-anterior-'));
   t.after(async () => {
@@ -95,16 +96,25 @@ test('migração preserva dados e o convite libera somente o titular', {timeout:
   assert.deepEqual(await req('/profissionais/publico'),{perfil:null});
   assert.equal((await req('/visitas', {token:sessaoDono.token}))[0].id, visita);
 
-  const email = 'dono@example.test';
   const novaSenha = 'Nova senha do dono fictício';
+  assert.equal((await req('/auth/recursos')).conviteProfissionalDisponivel, true);
+  const outroEmail = 'outro@example.test';
+  const respostaOutro = await req('/auth/convite-profissional', {body:{email:outroEmail},status:202});
+  assert.throws(() => caixa.token(outroEmail, 'PROPRIETARIO'));
+  await req('/auth/cadastro', {body:{email,nome:'Cadastro reservado'},status:202});
+  assert.throws(() => caixa.token(email, 'CADASTRO'));
   await promisify(execFile)(process.execPath, ['dist/convidar.js'], {
     env: {...env, EMAIL_TEST_URL:caixa.emailUrl, AGENDA_OWNER_EMAIL:email},
   });
+  const tokenManual = caixa.token(email,'PROPRIETARIO');
+  assert.deepEqual(await req('/auth/convite-profissional', {body:{email:email.toUpperCase()},status:202}), respostaOutro);
   const token = caixa.token(email,'PROPRIETARIO');
+  assert.notEqual(token, tokenManual);
   await req('/auth/ativar-profissional', {body:{token,senha:novaSenha},status:204});
   await req('/auth/ativar-profissional', {body:{token,senha:novaSenha},status:400});
   await req('/visitas', {token:sessaoDono.token,status:401});
   const novoAcesso = await req('/auth/login', {body:{email,senha:novaSenha}});
   assert.equal(novoAcesso.conta.id, dono);
+  assert.equal((await req('/pedidos', {token:novoAcesso.token}))[0].id, pedido);
   assert.equal((await req('/visitas', {token:novoAcesso.token}))[0].id, visita);
 });
