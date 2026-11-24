@@ -62,6 +62,7 @@ A API aceita dia e hora no início de cada hora de Brasília. Ao agendar, o esta
 | --- | --- |
 | GET /saude | Público. Verifica a conexão com o banco. |
 | POST /auth/cadastro, /auth/confirmar-email, /auth/login | Público. Cadastro por e-mail e login por e-mail ou celular legado. |
+| GET /auth/recursos | Público. Informa se as operações de envio de e-mail estão disponíveis. |
 | POST /auth/recuperacao, /auth/redefinir-senha | Público. Recuperação pelo e-mail verificado. |
 | POST /auth/vincular-email, /auth/confirmar-vinculo, /auth/sair | Conta autenticada. |
 | POST /auth/ativar-profissional | Convite de uso único emitido pelo operador para a conta do titular. |
@@ -96,6 +97,12 @@ curl -fsS https://api.lucas.grupo-04.sd.ufersa.dev.br/saude
 ```
 
 ## Apresentação de 27/11/2026
+
+Na versão acadêmica, o cadastro e a recuperação por e-mail ficam indisponíveis enquanto o envio estiver sem configuração. As duas contas fictícias são provisionadas pelo operador, fora do cadastro público. O procedimento não verifica nem vincula endereços de e-mail.
+
+1. O operador mantém as duas senhas distintas no arquivo privado `/opt/agenda/.demonstracao.env` da EC2. Em uma sessão administrativa já autorizada, carregue o arquivo com `set -a; . /opt/agenda/.demonstracao.env; set +a` e execute `docker exec -e DEMO_CLIENTE_A_SENHA -e DEMO_CLIENTE_B_SENHA agenda-api-1 npm run seed:demonstracao`. O comando cria somente as contas fictícias de cliente. Transmita as senhas aos participantes por um canal privado.
+2. Em dois perfis de navegador, abra **Entrar** → **Já tenho conta por celular**. Use `11900000001` para o cliente A e `11900000002` para o cliente B, cada um com a senha correspondente.
+3. Em um terceiro perfil, o titular abre **Área do profissional** → **Já tenho conta por celular** e usa as próprias credenciais. Se já vinculou um e-mail verificado, pode usá-lo para entrar. Após a demonstração, saia das três sessões.
 
 Use duas sessões de cliente de teste e uma sessão profissional autorizada, em perfis de navegador separados. No painel **Rede**, mostre **Método**, **Status** e as abas de corpo e resposta JSON. Oculte cabeçalhos de autenticação e use apenas dados fictícios.
 

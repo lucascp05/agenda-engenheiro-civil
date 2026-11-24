@@ -106,18 +106,22 @@ function Formulario({ titulo, enviar, children }: {
   </form>;
 }
 
-function Acesso({ entrar, profissional, destino, cadastro = false, alternarCadastro }: {
+const avisoEmail = 'Cadastro e recuperação por e-mail estão indisponíveis nesta versão. Entre com uma conta existente.';
+
+function Acesso({ entrar, profissional, destino, cadastro = false, alternarCadastro, emailDisponivel }: {
   entrar: (sessao: Sessao) => Promise<void> | void;
   profissional?: boolean;
   destino?: 'novo' | 'pedidos';
   cadastro?: boolean;
   alternarCadastro?: (cadastro: boolean) => void;
+  emailDisponivel?: boolean;
 }) {
   const [legado, setLegado] = useState(false);
   const [recuperar, setRecuperar] = useState(false);
   const [retorno, setRetorno] = useState('');
   const [cadastroEnviado, setCadastroEnviado] = useState(false);
   const celular = legado && !cadastro && !recuperar;
+  const emailBloqueado = (cadastro || recuperar) && emailDisponivel === false;
   const titulo = cadastro ? 'Crie sua conta' : recuperar ? 'Redefinir senha' : profissional ? 'Entrar como profissional' : 'Acesso do cliente';
   async function enviar(dados: Record<string, string>) {
     if (!cadastro && !recuperar) return entrar(await api<Sessao>('/auth/login', undefined, dados));
@@ -134,9 +138,9 @@ function Acesso({ entrar, profissional, destino, cadastro = false, alternarCadas
   }
   return <section className="painel estreito acesso painel-formulario">
     <h1>{titulo}</h1>
-    {cadastro && <p>Informe seu nome e e-mail. Você vai criar a senha ao abrir o link de confirmação.</p>}
-    {!cadastro && !recuperar && destino === 'novo' && <p>Entre ou crie uma conta para continuar com seu pedido.</p>}
-    <Formulario key={titulo + celular} titulo={cadastro ? cadastroEnviado ? 'Reenviar confirmação' : 'Enviar confirmação' : recuperar ? 'Enviar link' : 'Entrar'} enviar={enviar}>
+    {cadastro && !emailBloqueado && <p>Informe seu nome e e-mail. Você vai criar a senha ao abrir o link de confirmação.</p>}
+    {!cadastro && !recuperar && destino === 'novo' && <p>{emailDisponivel === false ? 'Entre para continuar com seu pedido.' : 'Entre ou crie uma conta para continuar com seu pedido.'}</p>}
+    {emailBloqueado ? <p className="retorno" role="status">{avisoEmail}</p> : <Formulario key={titulo + celular} titulo={cadastro ? cadastroEnviado ? 'Reenviar confirmação' : 'Enviar confirmação' : recuperar ? 'Enviar link' : 'Entrar'} enviar={enviar}>
       {erro => <>
         {cadastro && <Campo nome="nome" rotulo="Nome" erro={erro}><input name="nome" autoComplete="name" required minLength={2} maxLength={80}/></Campo>}
         {celular
@@ -144,7 +148,7 @@ function Acesso({ entrar, profissional, destino, cadastro = false, alternarCadas
           : <Campo nome="email" rotulo="E-mail" erro={erro}><input name="email" type="email" autoComplete={cadastro || recuperar ? 'email' : 'username'} required maxLength={254}/></Campo>}
         {!cadastro && !recuperar && <Campo nome="senha" rotulo="Senha" erro={erro}><input name="senha" type="password" autoComplete="current-password" required minLength={8} maxLength={128}/></Campo>}
       </>}
-    </Formulario>
+    </Formulario>}
     {retorno && <p className="retorno" role="status">{retorno}</p>}
     {!profissional && alternarCadastro && <button className="texto alternar-acesso" onClick={() => alternar(!cadastro && !recuperar)}>{cadastro || recuperar ? 'Voltar para Entrar' : 'Criar conta'}</button>}
     {!cadastro && !recuperar && <button className="texto alternar-acesso" onClick={() => { setLegado(!legado); setRetorno(''); }}>{celular ? 'Entrar com e-mail' : 'Já tenho conta por celular'}</button>}
@@ -326,6 +330,13 @@ const confirmacoes: Record<Acao, string> = {
 };
 function App() {
   const [sessao, setSessao] = useState(lerSessao);
+  const [emailDisponivel, setEmailDisponivel] = useState<boolean>();
+  useEffect(() => {
+    const controller = new AbortController();
+    void api<{ emailDisponivel: boolean }>('/auth/recursos', undefined, undefined, controller.signal)
+      .then(recursos => setEmailDisponivel(recursos.emailDisponivel)).catch(() => {});
+    return () => controller.abort();
+  }, []);
   const [link, setLink] = useState(lerLinkEmail);
   const [tela, setTela] = useState<Tela>(link ? 'email' : sessao?.conta.profissional ? 'pedidos' : 'inicio');
   useEffect(() => {
@@ -510,10 +521,11 @@ function App() {
     <main className="limite" id="area-profissional">
       {aviso && <p className="aviso" role="status">{aviso}</p>}
       {tela === 'inicio' && <Capa pedir={() => !sessao || cliente ? ir('novo') : abrirAreaProfissional()} acompanhar={() => !sessao || cliente ? ir('pedidos') : abrirAreaProfissional()}/>}
-      {tela === 'acesso-profissional' && <Acesso key={tela} profissional entrar={entrar}/>}
+      {tela === 'acesso-profissional' && <Acesso key={tela} profissional entrar={entrar} emailDisponivel={emailDisponivel}/>}
       {tela === 'conta' && sessao && <section className="painel estreito painel-formulario">
         <h1>Minha conta</h1>
         {sessao.conta.email ? <p>E-mail verificado: {sessao.conta.email}</p> :
+          emailDisponivel === false ? <p>Vínculo por e-mail indisponível nesta versão.</p> :
           <Formulario titulo="Enviar confirmação" enviar={async dados => {
             const { mensagem } = await enviar<{ mensagem: string }>('/auth/vincular-email', dados);
             setAviso(mensagem);
@@ -531,7 +543,7 @@ function App() {
       {tela === 'email' && link && <>
         {link.acao === 'VINCULO' && !sessao ? <>
           <p className="aviso">Entre na mesma conta que solicitou o vínculo.</p>
-          <Acesso entrar={entrar}/>
+          <Acesso entrar={entrar} emailDisponivel={emailDisponivel}/>
         </> : <section className="painel estreito painel-formulario">
           <h1>{link.acao === 'VINCULO' ? 'Confirmar seu e-mail' : link.acao === 'CADASTRO' ? 'Confirmar e-mail e criar conta' : link.acao === 'PROPRIETARIO' ? 'Ativar acesso profissional' : 'Definir nova senha'}</h1>
           <Formulario titulo={link.acao === 'VINCULO' ? 'Vincular e-mail' : 'Salvar senha'} enviar={confirmarLink}>{erro =>
@@ -540,7 +552,7 @@ function App() {
           }</Formulario>
         </section>}
       </>}
-      {!sessao && (tela === 'novo' || tela === 'pedidos') && <Acesso key={tela} entrar={entrar} destino={tela} cadastro={cadastroDireto} alternarCadastro={setCadastroDireto}/>}
+      {!sessao && (tela === 'novo' || tela === 'pedidos') && <Acesso key={tela} entrar={entrar} destino={tela} cadastro={cadastroDireto} alternarCadastro={setCadastroDireto} emailDisponivel={emailDisponivel}/>}
       {cliente && tela === 'novo' && <NovoPedido enviar={async dados => {
         await enviar('/pedidos', dados);
         ir('pedidos');

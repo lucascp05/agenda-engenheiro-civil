@@ -104,10 +104,16 @@ class Acesso {
     return { ok: true };
   }
 
+  @Get('auth/recursos')
+  recursos() {
+    return { emailDisponivel: this.email.disponivel() };
+  }
+
   @Post('auth/cadastro')
   @HttpCode(202)
   @UseGuards(LimitePorIp)
   async cadastro(@Body() dados: CadastroDto, @Res({ passthrough: true }) res: RespostaComCabecalho) {
+    this.email.exigirDisponibilidade();
     this.limites.consumir('cadastro-email:' + dados.email, 5, res);
     if (!await this.db.conta.count({ where: { email: dados.email } })) {
       await this.email.enviar({ finalidade: 'CADASTRO', ...dados });
@@ -186,6 +192,7 @@ class Acesso {
   @HttpCode(202)
   @UseGuards(LimitePorIp)
   async recuperacao(@Body() dados: EmailDto, @Res({ passthrough: true }) res: RespostaComCabecalho) {
+    this.email.exigirDisponibilidade();
     this.limites.consumir('recuperacao-email:' + dados.email, 5, res);
     const conta = await this.db.conta.findUnique({ where: { email: dados.email } });
     if (conta) {
