@@ -10,6 +10,13 @@ datasource db {
 enum Papel {
   CLIENTE
   ENGENHEIRO
+  ADMIN
+}
+
+enum SituacaoProfissional {
+  EM_ANALISE
+  APROVADO
+  REJEITADO
 }
 
 enum Situacao {
@@ -28,6 +35,25 @@ model Conta {
   pedidos Pedido[]
   versaoSessao Int @default(0)
   sessoes SessaoAcesso[]
+  perfilProfissional PerfilProfissional? @relation("Solicitante")
+  revisoesProfissionais PerfilProfissional[] @relation("Revisor")
+}
+
+model PerfilProfissional {
+  contaId            String               @id
+  conta              Conta                @relation("Solicitante", fields: [contaId], references: [id])
+  nomeCompleto       String
+  titulo             String
+  creaUf             String
+  registro           String
+  autorizaPublicacao Boolean              @default(false)
+  situacao           SituacaoProfissional @default(EM_ANALISE)
+  criadoEm           DateTime             @default(now()) @db.Timestamptz(3)
+  revisorId          String?
+  revisor            Conta?               @relation("Revisor", fields: [revisorId], references: [id], onDelete: Restrict)
+  revisadoEm         DateTime?            @db.Timestamptz(3)
+  fonteOficial       String?
+  metodoIdentidade   String?
 }
 
 model SessaoAcesso {

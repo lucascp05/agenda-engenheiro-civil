@@ -1,5 +1,6 @@
-import { Transform } from 'class-transformer';
-import { IsIn, IsOptional, IsString, IsUrl, IsUUID, Length, Matches } from 'class-validator';
+import 'reflect-metadata';
+import { Transform, Type } from 'class-transformer';
+import { IsBoolean, IsDefined, IsIn, IsOptional, IsString, IsUrl, IsUUID, Length, Matches, ValidateNested } from 'class-validator';
 
 export const servicos = ['Topografia', 'CAR', 'INCRA', 'Projetos', 'Não sei qual serviço preciso'];
 const trim = ({ value }: { value: unknown }) => typeof value === 'string' ? value.trim() : value;
@@ -24,6 +25,51 @@ export class CadastroDto extends LoginDto {
 
   @Transform(trim) @IsString() @Length(2, 80)
   nome!: string;
+}
+
+export const ufs = 'AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO'.split(' ');
+
+export class ConsentimentoDto {
+  @IsBoolean()
+  autorizaPublicacao!: boolean;
+}
+
+export class RegistroProfissionalDto extends ConsentimentoDto {
+  @Transform(trim) @IsString() @Length(2, 120)
+  titulo!: string;
+
+  @IsIn(ufs)
+  creaUf!: string;
+
+  @Transform(trim) @Matches(/^[A-Za-z0-9][A-Za-z0-9./-]{1,39}$/)
+  registro!: string;
+}
+
+export class PerfilProfissionalDto extends RegistroProfissionalDto {
+  @Transform(trim) @IsString() @Length(3, 80)
+  nomeCompleto!: string;
+}
+
+export class CadastroProfissionalDto extends CadastroDto {
+  @IsDefined() @ValidateNested() @Type(() => RegistroProfissionalDto)
+  registro!: RegistroProfissionalDto;
+}
+
+export class RevisaoProfissionalDto {
+  @IsIn(['APROVADO', 'REJEITADO'])
+  decisao!: 'APROVADO' | 'REJEITADO';
+
+  @IsBoolean()
+  dadosConferidos!: boolean;
+
+  @IsBoolean()
+  titularConfirmado!: boolean;
+
+  @IsOptional() @IsIn(['CONFEA', 'CREA'])
+  fonteOficial?: string;
+
+  @IsOptional() @IsIn(['CONTATO_INSTITUCIONAL', 'VERIFICACAO_PRESENCIAL', 'CONFIRMACAO_PELO_CREA'])
+  metodoIdentidade?: string;
 }
 
 export class PedidoDto {

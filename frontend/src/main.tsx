@@ -2,7 +2,7 @@ import { cloneElement, useEffect, useId, useState, type FormEvent, type ReactEle
 import { createRoot } from 'react-dom/client';
 import './style.css';
 
-type Conta = { nome: string; celular: string; papel: 'CLIENTE' | 'ENGENHEIRO' };
+type Conta = { nome: string; celular: string; papel: 'CLIENTE' | 'ENGENHEIRO' | 'ADMIN' };
 type Sessao = { conta: Conta; token: string; expiraEm: string };
 type Situacao = 'RECEBIDO' | 'INFORMACOES' | 'MARCADO' | 'CONCLUIDO';
 type Lugar = { municipio: string; comunidade?: string; local: string };
@@ -106,20 +106,20 @@ function Formulario({ titulo, enviar, children }: {
   </form>;
 }
 
-function Acesso({ entrar, profissional, destino, negado, irParaPedidos, cadastroInicial = false }: {
+function Acesso({ entrar, profissional, destino, negado, irParaPedidos, cadastro = false, alternarCadastro }: {
   entrar: (sessao: Sessao) => void;
   profissional?: boolean;
   destino?: 'novo' | 'pedidos';
   negado?: boolean;
   irParaPedidos?: () => void;
-  cadastroInicial?: boolean;
+  cadastro?: boolean;
+  alternarCadastro?: (cadastro: boolean) => void;
 }) {
-  const [cadastro, setCadastro] = useState(cadastroInicial);
   const [celular, setCelular] = useState('');
   const [ajuda, setAjuda] = useState(false);
-  return <section className="painel estreito acesso">
-    <h1>{profissional ? 'Acesso do engenheiro' : cadastro ? 'Crie sua conta' : 'Acesso do cliente'}</h1>
-    <p>{profissional ? 'Use o celular com DDD e a senha da sua conta de engenheiro.' : destino === 'novo'
+  return <section className="painel estreito acesso painel-formulario">
+    <h1>{profissional ? 'Entrar como profissional' : cadastro ? 'Crie sua conta' : 'Acesso do cliente'}</h1>
+    <p>{profissional ? 'Use o celular com DDD e a senha da sua conta profissional ou de administração.' : destino === 'novo'
       ? 'Entre ou crie uma conta para continuar com seu pedido de visita.'
       : 'Entre ou crie uma conta para acessar seus pedidos.'}</p>
     {negado && <div className="retorno erro acesso-negado">
@@ -135,25 +135,41 @@ function Acesso({ entrar, profissional, destino, negado, irParaPedidos, cadastro
           {cadastro && <small className="suave" id="ajuda-senha">Use pelo menos 15 caracteres. Pode ser uma frase fácil de lembrar.</small>}
         </div>
         {cadastro && erro?.status === 409 && <div className="acoes">
-          <button type="button" className="secundario" onClick={() => setCadastro(false)}>Entrar com este celular</button>
+          <button type="button" className="secundario" onClick={() => alternarCadastro?.(false)}>Entrar com este celular</button>
           <button type="button" className="texto" onClick={() => setAjuda(true)}>Buscar ajuda</button>
         </div>}
       </>}
     </Formulario>
-    {!profissional && <button className="texto alternar-acesso" onClick={() => setCadastro(!cadastro)}>{cadastro ? 'Já tenho conta' : 'Criar conta'}</button>}
+    {!profissional && <button className="texto alternar-acesso" onClick={() => alternarCadastro?.(!cadastro)}>{cadastro ? 'Já tenho conta' : 'Criar conta'}</button>}
     {!profissional && !cadastro && <button className="texto alternar-acesso" aria-expanded={ajuda} onClick={() => setAjuda(!ajuda)}>Preciso de ajuda para entrar</button>}
     {!profissional && ajuda && <p className="retorno" role="status">Se você não lembra a senha ou perdeu acesso ao celular, fale com o engenheiro pelo canal que já usa para falar com ele. Não envie sua senha.</p>}
   </section>;
 }
 
-function Capa({ pedir, acompanhar, cadastrar }: { pedir: () => void; acompanhar: () => void; cadastrar?: () => void }) {
+type RegistroPublico = { nomeCompleto: string; titulo: string; creaUf: string; registro: string; revisadoEm: string | null };
+type EstadoProfissional = 'EM_ANALISE' | 'APROVADO' | 'REJEITADO';
+type PerfilProfissional = RegistroPublico & { situacao: EstadoProfissional; autorizaPublicacao: boolean };
+type Revisao = PerfilProfissional & { contaId: string; conta: { celular: string }; revisor: { nome: string } | null };
+const consultaOficial = 'https://consultaprofissional.confea.org.br/';
+const ufs = 'AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO'.split(' ');
+const situacoesProfissionais: Record<EstadoProfissional, string> = {
+  EM_ANALISE: 'Em análise', APROVADO: 'Aprovado', REJEITADO: 'Rejeitado',
+};
+
+function Capa({ pedir, acompanhar }: { pedir: () => void; acompanhar: () => void }) {
+  const [perfil, setPerfil] = useState<RegistroPublico | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    void api<{ perfil: RegistroPublico | null }>('/profissionais/publico', undefined, undefined, controller.signal)
+      .then(({ perfil }) => setPerfil(perfil)).catch(() => {});
+    return () => controller.abort();
+  }, []);
   return <>
     <section className="hero">
       <div className="hero-conteudo">
         <h1>Solicite uma visita técnica</h1>
         <p>Conte o que você precisa e acompanhe por aqui quando a visita for marcada.</p>
-        <div className="acoes"><button className="primario" onClick={pedir}>Pedir uma visita</button><button className="secundario" onClick={acompanhar}>Acompanhar meu pedido</button></div>
-        {cadastrar && <button className="texto criar-na-capa" onClick={cadastrar}>Criar conta</button>}
+        <div className="acoes"><button className="primario" onClick={pedir}>Pedir atendimento</button><button className="secundario" onClick={acompanhar}>Acompanhar meu pedido</button></div>
       </div>
       <picture className="hero-foto">
         <source media="(max-width: 767px)" srcSet="/topografia-rural-mobile.webp"/>
@@ -164,6 +180,20 @@ function Capa({ pedir, acompanhar, cadastrar }: { pedir: () => void; acompanhar:
       <h2>Serviços</h2>
       <div className="servicos">{servicosCapa.map(([nome, descricao]) => <article key={nome}><h3>{nome}</h3><p>{descricao}</p></article>)}</div>
     </section>
+    <section className="secao-capa painel quem-atende">
+      <h2>Quem atende</h2>
+      {perfil ? <div className="identidade-profissional">
+        <div>
+          <h3>{perfil.nomeCompleto}</h3>
+          <p className="titulo-profissional">{perfil.titulo}</p>
+          <p className="registro-profissional">CREA-{perfil.creaUf} <strong>{perfil.registro}</strong></p>
+        </div>
+        <div className="consulta-profissional">
+          {perfil.revisadoEm && <p>Registro conferido pela Agenda em {dataCurta.format(new Date(perfil.revisadoEm))}.</p>}
+          <a className="secundario" href={consultaOficial} target="_blank" rel="noreferrer">Consultar registro no Confea</a>
+        </div>
+      </div> : <p>O perfil profissional aparece aqui após a conferência e a autorização de publicação.</p>}
+    </section>
     <section className="secao-capa">
       <h2>Como funciona</h2>
       <ol className="fluxo">{etapas.map(([titulo, descricao]) => <li key={titulo}><h3>{titulo}</h3><p>{descricao}</p></li>)}</ol>
@@ -171,9 +201,51 @@ function Capa({ pedir, acompanhar, cadastrar }: { pedir: () => void; acompanhar:
   </>;
 }
 
+function FormularioProfissional({ autenticado, enviar }: { autenticado: boolean; enviar: (dados: Record<string, string>) => Promise<void> }) {
+  return <section className="painel estreito painel-formulario">
+    <h1>{autenticado ? 'Verificar minha conta profissional' : 'Solicitar cadastro profissional'}</h1>
+    <p>Preencha os dados como aparecem no registro do Confea/CREA. O acesso aos pedidos depende de revisão.</p>
+    <Formulario titulo="Enviar solicitação" enviar={enviar}>{erro => <>
+      <Campo nome="nome" rotulo="Nome completo" erro={erro}><input name="nome" autoComplete="name" minLength={3} maxLength={80} required/></Campo>
+      {!autenticado && <>
+        <Campo nome="celular" rotulo="Celular com DDD" erro={erro}><input name="celular" type="tel" autoComplete="username" maxLength={20} required/></Campo>
+        <Campo nome="senha" rotulo="Senha (15 caracteres ou mais)" erro={erro}><input name="senha" type="password" autoComplete="new-password" minLength={15} maxLength={128} required/></Campo>
+      </>}
+      <Campo nome="titulo" rotulo="Título profissional conforme o registro" erro={erro}><input name="titulo" minLength={2} maxLength={120} required/></Campo>
+      <Campo nome="creaUf" rotulo="CREA-UF" erro={erro}><select name="creaUf" required defaultValue=""><option value="" disabled>Selecione a UF</option>{ufs.map(uf => <option key={uf}>{uf}</option>)}</select></Campo>
+      <Campo nome="registro" rotulo="Número de registro" erro={erro}><input name="registro" maxLength={40} required/></Campo>
+      <label className="confirmacao"><input name="autorizaPublicacao" type="checkbox"/> Autorizo publicar meu nome, título e registro na capa após a aprovação.</label>
+    </>}</Formulario>
+  </section>;
+}
+
+function PainelRevisao({ revisoes, revisar }: { revisoes: Revisao[]; revisar: (id: string, dados: object) => Promise<void> }) {
+  return <>
+    <p>Confira nome, título e registro ativo na fonte oficial. Confirme a identidade por um canal obtido independentemente do formulário.</p>
+    <p><a href={consultaOficial} target="_blank" rel="noreferrer">Abrir consulta oficial do Confea</a></p>
+    {!revisoes.length && <p className="painel">Nenhuma solicitação recebida.</p>}
+    {revisoes.map(item => <article key={item.contaId} className="painel cartao">
+      <div className="linha"><h2>{item.nomeCompleto}</h2><span className="estado">{situacoesProfissionais[item.situacao]}</span></div>
+      <p>{item.titulo} · CREA-{item.creaUf} {item.registro}</p>
+      <p>Celular informado no cadastro: {item.conta.celular}</p>
+      {item.revisor && item.revisadoEm && <p>Revisado por {item.revisor.nome} em {dataCurta.format(new Date(item.revisadoEm))}.</p>}
+      {item.situacao === 'EM_ANALISE' && <Formulario titulo="Registrar decisão" enviar={dados => revisar(item.contaId, {
+        decisao: dados.decisao, dadosConferidos: dados.dadosConferidos === 'on',
+        titularConfirmado: dados.titularConfirmado === 'on', fonteOficial: dados.fonteOficial, metodoIdentidade: dados.metodoIdentidade,
+      })}>{erro => <>
+        <label className="confirmacao"><input type="checkbox" name="dadosConferidos"/> Conferi nome, título e situação do registro na fonte oficial.</label>
+        <Campo nome="fonteOficial" rotulo="Fonte oficial" erro={erro}><select name="fonteOficial" defaultValue=""><option value="">Selecione a fonte</option><option value="CONFEA">Consulta Confea</option><option value="CREA">CREA responsável</option></select></Campo>
+        <label className="confirmacao"><input type="checkbox" name="titularConfirmado"/> Confirmei por canal independente que a pessoa é titular do registro.</label>
+        <Campo nome="metodoIdentidade" rotulo="Canal de verificação independente" erro={erro}><select name="metodoIdentidade" defaultValue=""><option value="">Selecione o canal</option><option value="CONTATO_INSTITUCIONAL">Contato institucional obtido de fonte independente</option><option value="VERIFICACAO_PRESENCIAL">Verificação presencial</option><option value="CONFIRMACAO_PELO_CREA">Confirmação pelo CREA</option></select></Campo>
+        <Campo nome="decisao" rotulo="Decisão" erro={erro}><select name="decisao" required defaultValue=""><option value="" disabled>Selecione a decisão</option><option value="APROVADO">Aprovar</option><option value="REJEITADO">Rejeitar</option></select></Campo>
+      </>}</Formulario>}
+    </article>)}
+  </>;
+}
+
 function NovoPedido({ enviar }: { enviar: (dados: object) => Promise<void> }) {
-  return <section className="painel estreito">
-    <h1>Pedir uma visita</h1>
+  return <section className="painel estreito painel-formulario">
+    <h1>Pedir atendimento</h1>
     <p>Informe o serviço e o local. O engenheiro vai definir o dia e o horário.</p>
     <Formulario titulo="Enviar pedido" enviar={enviar}>{erro => <>
       <Campo nome="servico" rotulo="Tipo de serviço" erro={erro}><select name="servico" required defaultValue=""><option value="" disabled>Selecione um serviço</option>{servicos.map(s => <option key={s}>{s}</option>)}</select></Campo>
@@ -256,7 +328,8 @@ function Agenda({ visitas }: { visitas: Visita[] }) {
   </>;
 }
 
-type Tela = 'inicio' | 'novo' | 'pedidos' | 'agenda' | 'acesso-engenheiro';
+type Tela = 'inicio' | 'novo' | 'pedidos' | 'agenda' | 'profissional' | 'acesso-profissional'
+  | 'cadastro-profissional' | 'situacao-profissional' | 'verificar-conta' | 'revisao';
 const confirmacoes: Record<Acao, string> = {
   informacoes: 'Mensagem enviada. O cliente pode responder em Meus pedidos.',
   respostas: 'Resposta enviada. O engenheiro pode continuar a análise do pedido.',
@@ -265,7 +338,11 @@ const confirmacoes: Record<Acao, string> = {
 };
 function App() {
   const [sessao, setSessao] = useState(lerSessao);
-  const [tela, setTela] = useState<Tela>(() => lerSessao()?.conta.papel === 'ENGENHEIRO' ? 'agenda' : 'inicio');
+  const [tela, setTela] = useState<Tela>(() => {
+    if (sessao?.conta.papel === 'ADMIN') return 'revisao';
+    if (sessao?.conta.papel === 'ENGENHEIRO') return 'situacao-profissional';
+    return 'inicio';
+  });
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [visitas, setVisitas] = useState<Visita[]>([]);
   const [filtros, setFiltros] = useState('');
@@ -276,16 +353,22 @@ function App() {
   const [acessoNegado, setAcessoNegado] = useState(false);
   const [cadastroDireto, setCadastroDireto] = useState(false);
   const [saindo, setSaindo] = useState(false);
-  const engenheiro = sessao?.conta.papel === 'ENGENHEIRO';
-  const areaCliente = sessao && !engenheiro && (tela === 'novo' || tela === 'pedidos');
+  const [perfil, setPerfil] = useState<PerfilProfissional | null>();
+  const [revisoes, setRevisoes] = useState<Revisao[]>([]);
+  const cliente = sessao?.conta.papel === 'CLIENTE';
+  const profissional = sessao?.conta.papel === 'ENGENHEIRO';
+  const admin = sessao?.conta.papel === 'ADMIN';
+  const engenheiro = profissional && perfil?.situacao === 'APROVADO';
 
   function limparSessao(expirada = false) {
-    const destino = engenheiro ? 'acesso-engenheiro' : tela === 'novo' ? 'novo' : 'pedidos';
+    const destino = profissional || admin ? 'acesso-profissional' : tela === 'novo' ? 'novo' : 'pedidos';
     sessionStorage.removeItem('agenda.sessao');
     setSessao(null);
     setPedidos([]);
     setVisitas([]);
     setFiltros('');
+    setPerfil(undefined);
+    setRevisoes([]);
     ir(expirada ? destino : 'inicio');
     if (expirada) setAviso('Sua sessão terminou. Entre novamente para continuar.');
   }
@@ -321,13 +404,17 @@ function App() {
   }, [sessao, tela]);
 
   useEffect(() => {
-    if (!sessao || (tela !== 'pedidos' && tela !== 'agenda')) return;
+    if (!sessao || !['pedidos', 'agenda', 'situacao-profissional', 'revisao'].includes(tela)) return;
     let ativa = true;
     setErro('');
     setCarregando(true);
-    const buscar = tela === 'agenda'
-      ? api<Visita[]>('/visitas', sessao.token).then(lista => { if (ativa) setVisitas(lista); })
-      : api<Pedido[]>('/pedidos' + (filtros ? '?' + filtros : ''), sessao.token).then(lista => { if (ativa) setPedidos(lista); });
+    const buscar = tela === 'revisao'
+      ? api<Revisao[]>('/profissionais/revisao', sessao.token).then(lista => { if (ativa) setRevisoes(lista); })
+      : tela === 'situacao-profissional'
+        ? api<{ perfil: PerfilProfissional | null }>('/profissionais/meu-perfil', sessao.token).then(dados => { if (ativa) setPerfil(dados.perfil); })
+        : tela === 'agenda'
+          ? api<Visita[]>('/visitas', sessao.token).then(lista => { if (ativa) setVisitas(lista); })
+          : api<Pedido[]>('/pedidos' + (filtros ? '?' + filtros : ''), sessao.token).then(lista => { if (ativa) setPedidos(lista); });
     void buscar.catch((e: Falha) => {
       if (!ativa) return;
       if (e.status === 401) {
@@ -338,10 +425,19 @@ function App() {
   }, [sessao, tela, filtros, recarga]);
 
   function entrar(nova: Sessao) {
+    if (nova.conta.papel !== 'CLIENTE' && tela !== 'acesso-profissional' && tela !== 'cadastro-profissional') {
+      throw new Falha('Use Área do profissional no rodapé para entrar com esta conta.');
+    }
+    setPerfil(undefined);
+    setRevisoes([]);
+    setPedidos([]);
+    setVisitas([]);
+    setFiltros('');
     sessionStorage.setItem('agenda.sessao', JSON.stringify(nova));
     setSessao(nova);
-    if (nova.conta.papel === 'ENGENHEIRO') ir('agenda');
-    else if (tela === 'acesso-engenheiro') setAcessoNegado(true);
+    if (nova.conta.papel === 'ENGENHEIRO') ir('situacao-profissional');
+    else if (nova.conta.papel === 'ADMIN') ir('revisao');
+    else if (tela === 'acesso-profissional') setAcessoNegado(true);
     else window.scrollTo(0, 0);
   }
 
@@ -366,34 +462,79 @@ function App() {
   const pendentes = pedidos.filter(pedido => pedido.situacao === 'RECEBIDO');
   const demais = pedidos.filter(pedido => pedido.situacao !== 'RECEBIDO');
 
+  function abrirAreaProfissional() {
+    ir(admin ? 'revisao' : profissional ? 'situacao-profissional' : 'profissional');
+  }
+
   return <>
     <header className="topo"><div className="limite barra">
-      <button className="marca" onClick={() => ir(engenheiro ? 'agenda' : 'inicio')}><span aria-hidden="true">⌖</span> <strong>Agenda do<br className="marca-quebra"/> Engenheiro Civil</strong></button>
+      <button className="marca" onClick={() => ir('inicio')}><span aria-hidden="true">⌖</span> <strong>Agenda do<br className="marca-quebra"/> Engenheiro Civil</strong></button>
       <nav aria-label="Navegação principal">
-        {engenheiro
-          ? <><button aria-current={tela === 'pedidos' ? 'page' : undefined} onClick={() => ir('pedidos')}>Pedidos</button><button aria-current={tela === 'agenda' ? 'page' : undefined} onClick={() => ir('agenda')}>Agenda</button></>
-          : areaCliente
-            ? <button aria-current={tela === 'pedidos' ? 'page' : undefined} onClick={() => ir('pedidos')}>Meus pedidos</button>
-            : <button className="link-engenheiro" aria-current={tela === 'acesso-engenheiro' ? 'page' : undefined} onClick={() => ir('acesso-engenheiro')}>Área do engenheiro</button>}
+        {!sessao && <>
+          <button onClick={() => ir(tela === 'novo' ? 'novo' : 'pedidos')}>Entrar</button>
+          <button className="atalho-cadastro" onClick={() => { ir(tela === 'novo' ? 'novo' : 'pedidos'); setCadastroDireto(true); }}>Criar conta</button>
+        </>}
+        {cliente && <button aria-current={tela === 'pedidos' ? 'page' : undefined} onClick={() => ir('pedidos')}>Meus pedidos</button>}
+        {engenheiro && <><button aria-current={tela === 'pedidos' ? 'page' : undefined} onClick={() => ir('pedidos')}>Pedidos</button><button aria-current={tela === 'agenda' ? 'page' : undefined} onClick={() => ir('agenda')}>Agenda</button></>}
         {sessao && <button className="sair" disabled={saindo} onClick={sair}>{saindo ? 'Saindo…' : 'Sair'}</button>}
       </nav>
     </div></header>
-    <main className="limite">
+    <main className="limite" id="area-profissional">
       {aviso && <p className="aviso" role="status">{aviso}</p>}
-      {tela === 'inicio' && <Capa pedir={() => ir('novo')} acompanhar={() => ir('pedidos')} cadastrar={sessao ? undefined : () => {
-        ir('novo');
-        setCadastroDireto(true);
-      }}/>}
-      {tela === 'acesso-engenheiro' && <Acesso key={tela} profissional entrar={entrar} negado={acessoNegado} irParaPedidos={() => ir('pedidos')}/>}
-      {!sessao && (tela === 'novo' || tela === 'pedidos') && <Acesso key={tela} entrar={entrar} destino={tela} cadastroInicial={cadastroDireto}/>}
-      {sessao && !engenheiro && tela === 'novo' && <NovoPedido enviar={async dados => {
+      {tela === 'inicio' && <Capa pedir={() => !sessao || cliente ? ir('novo') : abrirAreaProfissional()} acompanhar={() => !sessao || cliente ? ir('pedidos') : abrirAreaProfissional()}/>}
+      {tela === 'profissional' && <section className="painel estreito">
+        <h1>Área do profissional</h1><p>Entre para acompanhar sua verificação ou solicite um cadastro.</p>
+        <div className="acoes"><button className="primario" onClick={() => ir('acesso-profissional')}>Entrar como profissional</button><button className="secundario" onClick={() => ir('cadastro-profissional')}>Solicitar cadastro profissional</button></div>
+      </section>}
+      {tela === 'acesso-profissional' && <Acesso key={tela} profissional entrar={entrar} negado={acessoNegado} irParaPedidos={() => ir('pedidos')}/>}
+      {(tela === 'cadastro-profissional' || (tela === 'verificar-conta' && profissional)) && <FormularioProfissional
+        key={tela} autenticado={tela === 'verificar-conta'} enviar={async dados => {
+          const registro = { titulo: dados.titulo, creaUf: dados.creaUf, registro: dados.registro, autorizaPublicacao: dados.autorizaPublicacao === 'on' };
+          if (tela === 'verificar-conta') {
+            await enviar('/profissionais/meu-perfil', { ...registro, nomeCompleto: dados.nome });
+            ir('situacao-profissional');
+          } else entrar(await api<Sessao>('/auth/cadastro-profissional', undefined, { nome: dados.nome, celular: dados.celular, senha: dados.senha, registro }));
+        }}/>}
+      {tela === 'situacao-profissional' && profissional && <section className="painel estreito">
+        <h1>Situação profissional</h1>
+        {erro && <p className="retorno erro" role="alert">{erro}</p>}
+        {carregando && <p role="status">Consultando a solicitação…</p>}
+        {!carregando && perfil === null && <>
+          <p>Envie os dados do registro para verificar sua conta atual.</p>
+          <button className="primario" onClick={() => ir('verificar-conta')}>Verificar minha conta profissional</button>
+        </>}
+        {!carregando && perfil && <>
+          <h2>{situacoesProfissionais[perfil.situacao]}</h2>
+          <p>{perfil.nomeCompleto} · {perfil.titulo} · CREA-{perfil.creaUf} {perfil.registro}</p>
+          {perfil.situacao === 'EM_ANALISE' && <p>A administração vai conferir seu registro e confirmar a titularidade antes de liberar o painel.</p>}
+          {perfil.situacao === 'REJEITADO' && <p>Fale com a administração para esclarecer a decisão.</p>}
+          {perfil.situacao === 'APROVADO' && <p>Você já pode acessar Pedidos e Agenda.</p>}
+          {perfil.situacao !== 'REJEITADO' && <Formulario key={String(perfil.autorizaPublicacao)} titulo="Salvar preferência" enviar={async dados => {
+            setPerfil(await enviar<PerfilProfissional>('/profissionais/meu-perfil/publicacao', { autorizaPublicacao: dados.autorizaPublicacao === 'on' }));
+            setAviso('Preferência de publicação salva.');
+          }}>{() => <label className="confirmacao"><input name="autorizaPublicacao" type="checkbox" defaultChecked={perfil.autorizaPublicacao}/> Autorizo publicar meu nome, título e registro após aprovação.</label>}</Formulario>}
+        </>}
+        <button className="texto" disabled={carregando} onClick={() => setRecarga(n => n + 1)}>Atualizar situação</button>
+      </section>}
+      {tela === 'revisao' && admin && <>
+        <h1>Revisão profissional</h1>
+        {erro && <p className="retorno erro" role="alert">{erro}</p>}
+        <button className="secundario" disabled={carregando} onClick={() => setRecarga(n => n + 1)}>Atualizar solicitações</button>
+        {carregando ? <p role="status">Carregando solicitações…</p> : <PainelRevisao revisoes={revisoes} revisar={async (id, dados) => {
+          await enviar('/profissionais/revisao/' + id, dados);
+          setAviso('Decisão registrada.');
+          setRecarga(n => n + 1);
+        }}/>}
+      </>}
+      {!sessao && (tela === 'novo' || tela === 'pedidos') && <Acesso key={tela} entrar={entrar} destino={tela} cadastro={cadastroDireto} alternarCadastro={setCadastroDireto}/>}
+      {cliente && tela === 'novo' && <NovoPedido enviar={async dados => {
         await enviar('/pedidos', dados);
         ir('pedidos');
         setAviso('Pedido enviado. O engenheiro vai informar o dia e a hora por aqui.');
       }}/>}
-      {sessao && (tela === 'pedidos' || tela === 'agenda') && <>
+      {((tela === 'pedidos' && (cliente || engenheiro)) || (tela === 'agenda' && engenheiro)) && <>
         <div className="linha cabecalho"><h1>{tela === 'agenda' ? 'Agenda' : engenheiro ? 'Pedidos' : 'Meus pedidos'}</h1>
-          <div className="acoes">{!engenheiro && <button className="primario" onClick={() => ir('novo')}>Pedir uma visita</button>}
+          <div className="acoes">{cliente && <button className="primario" onClick={() => ir('novo')}>Pedir atendimento</button>}
           <button className="secundario" disabled={carregando} onClick={() => {
             setAviso('');
             setRecarga(n => n + 1);
@@ -416,7 +557,7 @@ function App() {
         {tela === 'agenda' && !carregando && !erro && <Agenda visitas={visitas}/>}
         {tela === 'pedidos' && !carregando && !erro && !pedidos.length && <div className="painel vazio">
           <h2>{engenheiro && filtros ? 'Nenhum resultado' : 'Ainda não há pedidos'}</h2>
-          <p>{engenheiro ? filtros ? 'Altere os filtros ou escolha Limpar para ver todos os pedidos.' : 'As solicitações dos clientes aparecem aqui.' : 'Escolha Pedir uma visita para enviar sua primeira solicitação.'}</p>
+          <p>{engenheiro ? filtros ? 'Altere os filtros ou escolha Limpar para ver todos os pedidos.' : 'As solicitações dos clientes aparecem aqui.' : 'Escolha Pedir atendimento para enviar sua primeira solicitação.'}</p>
         </div>}
         {tela === 'pedidos' && !!pedidos.length && (engenheiro ? <>
           {!!pendentes.length && <section className="fila atencao"><h2>Precisam de atenção <span>{pendentes.length}</span></h2>{pendentes.map(cartao)}</section>}
@@ -424,7 +565,10 @@ function App() {
         </> : pedidos.map(cartao))}
       </>}
     </main>
-    <footer className="limite rodape">Agenda do Engenheiro Civil</footer>
+    <footer className="limite rodape">
+      <span>Agenda do Engenheiro Civil</span>
+      <a href="#area-profissional" onClick={evento => { evento.preventDefault(); abrirAreaProfissional(); }}>Área do profissional</a>
+    </footer>
   </>;
 }
 

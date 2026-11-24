@@ -15,15 +15,28 @@ docker compose exec api npm run seed
 
 Abra [o frontend local](http://localhost:8080). A API está em [localhost:3000](http://localhost:3000/saude). A API aplica as migrações versionadas na inicialização e o PostgreSQL fica na rede interna do Compose.
 
-Na capa, escolha **Pedir uma visita** ou **Acompanhar meu pedido** para criar ou acessar uma conta de cliente. Para abrir o painel, escolha **Área do engenheiro** e entre com a conta provisionada. Use dois perfis de navegador ou uma janela comum e outra privada para manter as duas sessões abertas.
+Na capa, **Entrar** e **Criar conta** são para clientes. **Pedir atendimento** leva ao formulário depois do login ou cadastro. Use **Área do profissional** no rodapé para acessar a área profissional ou a revisão administrativa. Use perfis de navegador separados para manter as sessões abertas.
+
+### Verificar e ativar a conta profissional existente
+
+1. Com o banco e a migração em execução, configure `ADMIN_NAME`, `ADMIN_PHONE` e `ADMIN_PASSWORD` no `.env` privado. Use um celular diferente do profissional e uma senha de pelo menos 15 caracteres. Recrie a API para carregar as variáveis e execute `docker compose exec api npm run seed:admin`. O comando recusa celulares de contas de outro perfil.
+2. Entre com a conta profissional que já existe em **Área do profissional** → **Entrar como profissional** → **Verificar minha conta profissional**. Envie o nome completo, título, CREA-UF e registro conforme o cadastro oficial. Autorize a exibição na capa somente com a concordância do titular. Use a conta existente para preservar o acesso e os dados. O `seed` anterior criou uma conta com papel `ENGENHEIRO`, sem conferir identidade ou registro.
+3. Em outra sessão, entre pela mesma área com a conta administrativa. Na fila **Revisão profissional**, confira nome, título, CREA-UF, número e situação do registro na [consulta oficial do Confea](https://consultaprofissional.confea.org.br/). Se necessário, confirme com o CREA responsável.
+4. Confirme que o titular fez a solicitação por um canal encontrado de forma independente. Use, por exemplo, contato institucional obtido de fonte oficial ou verificação presencial. O celular informado no formulário e a consulta ao registro, por si só, são insuficientes para ligar a conta à pessoa. Evite coletar documentos ou registrar detalhes pessoais da verificação na Agenda.
+5. Registre a fonte e o canal de conferência e aprove somente com as duas confirmações. Em caso de dúvida, deixe em análise ou rejeite. A Agenda guarda a conta revisora e o horário da decisão. Em seguida, atualize **Situação profissional** para liberar **Pedidos** e **Agenda**. Confira **Quem atende** em uma sessão anônima. A autorização de exibição pode ser retirada pelo profissional.
+
+A migração preserva contas, sessões, pedidos e visitas anteriores. Uma conta com papel `ENGENHEIRO` precisa passar pela revisão para voltar a acessar os dados dos clientes. A Agenda atende um escritório com um calendário compartilhado e permite um profissional aprovado por banco. Use dados fictícios em um banco local e repita a conferência da conta real no banco da publicação durante a janela de atualização, antes de retomar o atendimento.
 
 ```sh
 docker compose exec -e TEST_API_URL=http://localhost:3000 api npm test
 docker compose exec api npm run test:seguranca
+docker compose exec api npm run test:profissionais
 docker compose down
 ```
 
 Execute a suíte apenas contra um banco de demonstração. Ela cria registros fictícios e verifica cadastro e login com normalização, propriedade dos pedidos, permissões, filtros, troca de mensagens, confirmação e conclusão. Também disputa o mesmo horário entre dois pedidos e disputa horários diferentes para o mesmo pedido.
+
+Para `npm test`, use as credenciais de um profissional fictício aprovado nas variáveis `ENGINEER_*`. A suíte `test:profissionais` cria sua própria área isolada no PostgreSQL e cobre cadastro, revisão, consentimento e agendamento.
 
 ## Variáveis de ambiente
 
@@ -35,6 +48,7 @@ Execute a suíte apenas contra um banco de demonstração. Ela cria registros fi
 | `CORS_ORIGINS` | Origens autorizadas, separadas por vírgulas. |
 | `VITE_API_URL` | URL da API incorporada durante a compilação do frontend. |
 | `ENGINEER_NAME`, `ENGINEER_PHONE`, `ENGINEER_PASSWORD` | Credenciais configuradas fora do Git para o comando `seed`. |
+| `ADMIN_NAME`, `ADMIN_PHONE`, `ADMIN_PASSWORD` | Credenciais privadas do revisor para `seed:admin`. |
 | `SITE_DOMAIN`, `API_DOMAIN` | Domínios do proxy HTTPS. |
 | `TEST_API_URL` | Endereço da API de demonstração usado pela suíte. |
 
@@ -71,6 +85,10 @@ A API recebe dia e hora no fuso de Brasília, aceita somente o início de cada h
 | --- | --- |
 | `GET /saude` | Público. Verifica a conexão com o banco. |
 | `POST /auth/cadastro`, `POST /auth/login` | Público. O cadastro cria conta de cliente. |
+| `POST /auth/cadastro-profissional` | Público. Cria conta profissional em análise, com os limites do cadastro. |
+| `GET /profissionais/publico` | Público. Exibe o perfil aprovado com autorização, incluindo a data da revisão. |
+| `GET /profissionais/meu-perfil`, `POST /profissionais/meu-perfil`, `POST /profissionais/meu-perfil/publicacao` | Conta profissional. Acompanha sua situação, solicita revisão de conta preexistente e atualiza seu consentimento. |
+| `GET /profissionais/revisao`, `POST /profissionais/revisao/:id` | Administração. Examina solicitações e registra a decisão. |
 | `POST /auth/sair` | Conta autenticada. Revoga a sessão atual. |
 | `POST /pedidos` | Cliente autenticado. |
 | `GET /pedidos`, `GET /pedidos/:id` | Cliente consulta os próprios pedidos. Engenheiro consulta todos e pode filtrar a lista por `municipio` e `comunidade`. |
