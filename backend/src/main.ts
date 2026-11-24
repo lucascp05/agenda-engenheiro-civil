@@ -2,8 +2,8 @@ import 'dotenv/config';
 import 'reflect-metadata';
 import {
   BadRequestException, Body, CanActivate, ConflictException, Controller, createParamDecorator,
-  ExecutionContext, ForbiddenException, Get, Injectable, Module, NotFoundException, Param,
-  ParseUUIDPipe, Post, Query, UnauthorizedException, UseGuards, ValidationPipe,
+  ExecutionContext, ForbiddenException, Get, HttpCode, Injectable, Module, NotFoundException, Param,
+  ParseUUIDPipe, Post, Query, Res, UnauthorizedException, UseGuards, ValidationPipe,
 } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { JwtModule, JwtService } from '@nestjs/jwt';
@@ -11,9 +11,11 @@ import { Papel, Prisma, Situacao } from '@prisma/client';
 import helmet from 'helmet';
 import { Db } from './db';
 import { CadastroDto, FiltrosDto, LoginDto, MensagemDto, PedidoDto, VisitaDto } from './dto';
-import { gerarHash, verificarSenha } from './senha';
+import { gerarHash, hashLegado, hashReserva, verificarSenha } from './senha';
+import { LimiteAcesso, type RespostaComCabecalho } from './limite-acesso';
 
-type Sessao = { sub: string; papel: Papel };
+type Sessao = { sub: string; papel: Papel; id: string };
+type TokenSessao = { sub: string; jti: string; ver: number };
 const Usuario = createParamDecorator((_, contexto: ExecutionContext) =>
   contexto.switchToHttp().getRequest().usuario as Sessao);
 const contaPublica = { id: true, nome: true, celular: true, papel: true };
@@ -32,28 +34,51 @@ function exigirPapel(usuario: Sessao, papel: Papel) {
 }
 
 const jwtSecret = process.env.JWT_SECRET;
+const publicacao = process.env.AGENDA_PUBLICACAO === '1';
 if (!jwtSecret || jwtSecret.length < 32) throw new Error('Configure JWT_SECRET com pelo menos 32 caracteres.');
+if (publicacao && jwtSecret.startsWith('apenas-demo-local')) throw new Error('Configure um JWT_SECRET próprio para a publicação.');
+if (publicacao && new URL(process.env.DATABASE_URL ?? '').password === 'apenas-demo-local') {
+  throw new Error('Configure uma senha própria para o PostgreSQL.');
+}
+const duracaoSessao = 8 * 60 * 60;
 
 @Injectable()
 class Autenticacao implements CanActivate {
-  constructor(private jwt: JwtService) {}
+  constructor(private jwt: JwtService, private db: Db) {}
 
   async canActivate(contexto: ExecutionContext) {
     const req = contexto.switchToHttp().getRequest();
     const token = req.headers.authorization?.match(/^Bearer (\S+)$/i)?.[1];
     if (!token) throw new UnauthorizedException('Entre na sua conta.');
-    try {
-      req.usuario = await this.jwt.verifyAsync<Sessao>(token);
-      return true;
-    } catch {
-      throw new UnauthorizedException('Sua sessão expirou. Entre novamente.');
-    }
+    const invalida = () => new UnauthorizedException('Sua sessão terminou. Entre novamente.');
+    const dados = await this.jwt.verifyAsync<TokenSessao>(token).catch(() => { throw invalida(); });
+    if (typeof dados.jti !== 'string' || typeof dados.sub !== 'string' || !Number.isInteger(dados.ver)) throw invalida();
+    const sessao = await this.db.sessaoAcesso.findUnique({
+      where: { id: dados.jti },
+      select: { contaId: true, expiraEm: true, conta: { select: { papel: true, versaoSessao: true } } },
+    });
+    if (!sessao || sessao.contaId !== dados.sub || sessao.expiraEm <= new Date() || sessao.conta.versaoSessao !== dados.ver) throw invalida();
+    req.usuario = { id: dados.jti, sub: sessao.contaId, papel: sessao.conta.papel };
+    return true;
+  }
+}
+
+@Injectable()
+class LimitePorIp implements CanActivate {
+  constructor(private limites: LimiteAcesso) {}
+
+  canActivate(contexto: ExecutionContext) {
+    const http = contexto.switchToHttp();
+    const cadastro = contexto.getHandler().name === 'cadastro';
+    const ip = http.getRequest<{ ip?: string }>().ip ?? 'desconhecido';
+    this.limites.consumir((cadastro ? 'cadastro-ip:' : 'login-ip:') + ip, cadastro ? 12 : 30, http.getResponse());
+    return true;
   }
 }
 
 @Controller()
 class Acesso {
-  constructor(private db: Db, private jwt: JwtService) {}
+  constructor(private db: Db, private jwt: JwtService, private limites: LimiteAcesso) {}
 
   @Get('saude')
   async saude() {
@@ -62,31 +87,50 @@ class Acesso {
   }
 
   @Post('auth/cadastro')
-  async cadastro(@Body() dados: CadastroDto) {
+  @UseGuards(LimitePorIp)
+  async cadastro(@Body() dados: CadastroDto, @Res({ passthrough: true }) res: RespostaComCabecalho) {
+    this.limites.consumir('cadastro-celular:' + dados.celular, 5, res);
     try {
       const conta = await this.db.conta.create({
-        data: { nome: dados.nome, celular: dados.celular, hash: await gerarHash(dados.senha) },
+        data: { nome: dados.nome, celular: dados.celular, hash: await gerarHash(dados.senha), papel: 'CLIENTE' },
         select: contaPublica,
       });
-      return this.sessao(conta);
+      return this.sessao(conta, 0);
     } catch (erro) {
-      if (erroUnico(erro)) throw new ConflictException({ message: 'Este celular já está cadastrado.', campos: { celular: 'Este celular já está cadastrado.' } });
+      if (erroUnico(erro)) throw new ConflictException({ message: 'Entre com este celular ou procure ajuda para acessar a conta.', campos: { celular: 'Já existe uma conta com este celular.' } });
       throw erro;
     }
   }
 
   @Post('auth/login')
-  async login(@Body() dados: LoginDto) {
+  @UseGuards(LimitePorIp)
+  async login(@Body() dados: LoginDto, @Res({ passthrough: true }) res: RespostaComCabecalho) {
+    this.limites.consumir('login-celular:' + dados.celular, 8, res);
     const conta = await this.db.conta.findUnique({ where: { celular: dados.celular } });
-    const hashReserva = '00000000000000000000000000000000:' + '00'.repeat(64);
     const valida = await verificarSenha(dados.senha, conta?.hash ?? hashReserva);
     if (!conta || !valida) throw new UnauthorizedException('Celular ou senha incorretos.');
     const { id, nome, celular, papel } = conta;
-    return this.sessao({ id, nome, celular, papel });
+    if (hashLegado(conta.hash)) {
+      await this.db.conta.updateMany({ where: { id, hash: conta.hash }, data: { hash: await gerarHash(dados.senha) } });
+    }
+    return this.sessao({ id, nome, celular, papel }, conta.versaoSessao);
   }
 
-  private async sessao(conta: { id: string; nome: string; celular: string; papel: Papel }) {
-    return { conta, token: await this.jwt.signAsync({ sub: conta.id, papel: conta.papel }) };
+  @Post('auth/sair')
+  @HttpCode(204)
+  @UseGuards(Autenticacao)
+  async sair(@Usuario() usuario: Sessao) {
+    await this.db.sessaoAcesso.deleteMany({ where: { id: usuario.id, contaId: usuario.sub } });
+  }
+
+  private async sessao(conta: { id: string; nome: string; celular: string; papel: Papel }, ver: number) {
+    const agora = new Date();
+    const expiraEm = new Date(agora.getTime() + duracaoSessao * 1000);
+    const [, { id }] = await this.db.$transaction([
+      this.db.sessaoAcesso.deleteMany({ where: { expiraEm: { lte: agora } } }),
+      this.db.sessaoAcesso.create({ data: { contaId: conta.id, expiraEm }, select: { id: true } }),
+    ]);
+    return { conta, expiraEm, token: await this.jwt.signAsync({ sub: conta.id, jti: id, ver }) };
   }
 }
 
@@ -217,21 +261,31 @@ class VisitasController {
 }
 
 @Module({
-  imports: [JwtModule.register({ secret: jwtSecret, signOptions: { expiresIn: '8h' } })],
+  imports: [JwtModule.register({
+    secret: jwtSecret,
+    signOptions: { algorithm: 'HS256', expiresIn: duracaoSessao, issuer: 'agenda-api', audience: 'agenda-web' },
+    verifyOptions: { algorithms: ['HS256'], issuer: 'agenda-api', audience: 'agenda-web' },
+  })],
   controllers: [Acesso, PedidosController, VisitasController],
-  providers: [Db, Autenticacao, PedidosService],
+  providers: [Db, Autenticacao, LimiteAcesso, LimitePorIp, PedidosService],
 })
 class App {}
 
 async function iniciar() {
+  const origens = (process.env.CORS_ORIGINS ?? 'http://localhost:5173').split(',').map(origem => origem.trim());
+  if (origens.some(origem => !/^https?:\/\/[^/]+$/.test(origem)) ||
+      (publicacao && (origens.length !== 1 || origens[0] !== 'https://' + process.env.SITE_DOMAIN))) {
+    throw new Error('Configure uma lista de origens autorizadas.');
+  }
   const app = await NestFactory.create(App, { logger: false, bodyParser: true });
+  if (publicacao) app.getHttpAdapter().getInstance().set('trust proxy', 1);
   app.use(helmet());
   app.use((_req: unknown, res: { setHeader: (name: string, value: string) => void }, next: () => void) => {
     res.setHeader('Cache-Control', 'no-store');
     next();
   });
   app.enableCors({
-    origin: (process.env.CORS_ORIGINS ?? 'http://localhost:5173').split(',').map(origem => origem.trim()),
+    origin: origens,
     methods: ['GET','POST','OPTIONS'],
     allowedHeaders: ['Authorization','Content-Type'],
   });
@@ -239,7 +293,8 @@ async function iniciar() {
     whitelist: true, forbidNonWhitelisted: true, transform: true,
     exceptionFactory: erros => new BadRequestException({
       message: 'Confira os campos destacados.',
-      campos: Object.fromEntries(erros.map(erro => [erro.property, erro.constraints?.matches ?? 'Confira este campo.'])),
+      campos: Object.fromEntries(erros.map(erro => [erro.property, erro.constraints?.matches ??
+        (erro.property === 'senha' ? erro.constraints?.isLength : undefined) ?? 'Confira este campo.'])),
     }),
   }));
   app.enableShutdownHooks();

@@ -1,4 +1,8 @@
 services:
+  api:
+    environment:
+      AGENDA_PUBLICACAO: "1"
+      SITE_DOMAIN: ${SITE_DOMAIN:?Configure SITE_DOMAIN}
   proxy:
     image: caddy:2-alpine
     environment:

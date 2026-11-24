@@ -19,7 +19,9 @@ services:
       DATABASE_URL: postgresql://agenda:${POSTGRES_PASSWORD}@db:5432/agenda
       JWT_SECRET: ${JWT_SECRET:?Configure JWT_SECRET em .env}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
-    env_file: .env
+      ENGINEER_NAME: ${ENGINEER_NAME:-}
+      ENGINEER_PHONE: ${ENGINEER_PHONE:-}
+      ENGINEER_PASSWORD: ${ENGINEER_PASSWORD:-}
     depends_on:
       db:
         condition: service_healthy

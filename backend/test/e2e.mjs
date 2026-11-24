@@ -3,7 +3,7 @@ import test from 'node:test';
 import { randomInt } from 'node:crypto';
 
 const base = process.env.TEST_API_URL || 'http://localhost:3000';
-const senha = 'SenhaDemo2026';
+const senha = 'Senha fictícia suíte de integração';
 
 async function req(path, {token, body, status = body ? 201 : 200} = {}) {
   const res = await fetch(base + path, {
@@ -29,10 +29,11 @@ async function cliente(nome) {
 test('fluxo real, permissões, filtros e agendamento concorrente', async () => {
   await req('/saude');
   await req('/pedidos', {status: 401});
-  const engenheiro = (await req('/auth/login', {body: {
-    celular: process.env.ENGINEER_PHONE || '84999000001',
-    senha: process.env.ENGINEER_PASSWORD || 'VisitaDemo2026',
-  }})).token;
+  const { ENGINEER_PHONE: celular, ENGINEER_PASSWORD: senha } = process.env;
+  assert.ok(celular && senha, 'Defina as credenciais da conta de demonstração no ambiente de teste.');
+  const acessoEngenheiro = await req('/auth/login', {body: {celular, senha}});
+  assert.equal(acessoEngenheiro.conta.papel, 'ENGENHEIRO');
+  const engenheiro = acessoEngenheiro.token;
   const primeiro = await cliente('Cliente Demo A');
   const segundo = await cliente('Cliente Demo B');
   const dados = {servico: 'Topografia', municipio: 'Mossoró', comunidade: 'Sítio Demo', local: 'Entrada da comunidade', descricao: 'Levantamento do terreno fictício'};

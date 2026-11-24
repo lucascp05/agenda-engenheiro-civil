@@ -14,11 +14,14 @@ export class LoginDto {
   @Matches(/^[1-9][0-9]9[0-9]{8}$/, {message: 'Informe o celular com DDD e 11 dígitos.'})
   celular!: string;
 
-  @IsString() @Length(8, 128)
+  @IsString() @Length(8, 128, { message: 'Digite uma senha válida.' })
   senha!: string;
 }
 
 export class CadastroDto extends LoginDto {
+  @IsString() @Length(15, 128, { message: 'Escolha uma senha de 15 a 128 caracteres.' })
+  declare senha: string;
+
   @Transform(trim) @IsString() @Length(2, 80)
   nome!: string;
 }
