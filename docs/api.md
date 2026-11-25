@@ -83,6 +83,32 @@ Respostas da API NestJS com dados fictícios gravados em PostgreSQL descartável
 
 Após a remarcação, o cliente entrou novamente e viu **14:00, horário de Brasília**, equivalente a `2035-02-10T17:00:00.000Z`.
 
+## Captura na API pública
+
+Teste acadêmico de 25/11/2026 pelo domínio da disciplina, revisão `12adb921552d94543bb7adeca98b1d6e4be821e2`. A propriedade e as contas do teste eram fictícias.
+
+`POST /pedidos` → **201 Created**
+
+```json
+{"id":"f9495fb5-2dcc-4e3d-a3c3-dadb9647ae37","situacao":"RECEBIDO","visita":null}
+```
+
+`POST /visitas` → **201 Created**
+
+```json
+{
+  "id": "f9495fb5-2dcc-4e3d-a3c3-dadb9647ae37",
+  "situacao": "MARCADO",
+  "visita": {
+    "id": "58ee994c-8243-4618-80e3-3a1a6511cec0",
+    "pedidoId": "f9495fb5-2dcc-4e3d-a3c3-dadb9647ae37",
+    "horario": "2035-06-16T16:00:00.000Z"
+  }
+}
+```
+
+Após a remarcação e novo login do cliente, `GET /pedidos/f9495fb5-2dcc-4e3d-a3c3-dadb9647ae37` devolveu **200 OK**, situação `MARCADO` e `2035-06-16T17:00:00.000Z`, equivalente a **14:00 em Brasília**.
+
 ## Exemplo de solicitação e agendamento
 
 Com a sessão do cliente, envie `POST /pedidos` com o seguinte JSON.

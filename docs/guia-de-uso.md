@@ -12,7 +12,7 @@ Abra o [site da Agenda](https://lucas.grupo-04.sd.ufersa.dev.br/). Se abrir uma 
 
 ## Profissional
 
-1. No rodapé, abra **Área do profissional**. Depois do provisionamento, entre com o e-mail do titular e a senha inicial recebida em privado. Em **Trocar senha**, digite a senha atual, escolha e confirme a nova e salve. Entre novamente com a nova senha. A troca encerra as sessões anteriores. Enquanto a conta de demonstração estiver selecionada, use **Já tenho conta por celular** e as credenciais acadêmicas fornecidas pelo operador.
+1. No rodapé, abra **Área do profissional**. Entre com o e-mail do titular e a senha inicial recebida em privado. Em **Trocar senha**, digite a senha atual, escolha e confirme a nova e salve. Entre novamente com a nova senha. A troca encerra as sessões anteriores.
 2. Em **Pedidos**, encontre o cartão do cliente. Use os filtros de município e comunidade se precisar reduzir a lista.
 3. Clique em **Marcar visita**, selecione uma data futura e uma hora cheia no fuso de Brasília e clique em **Confirmar visita**. Se o horário estiver ocupado, escolha outro. Para alterar uma visita já marcada, use **Remarcar visita** no pedido.
 4. Abra **Agenda** pelo topo para consultar as visitas de pedidos marcados. O cliente vê a confirmação em **Meus pedidos**. Para encerrar o atendimento, volte ao pedido e use **Concluir atendimento**.
@@ -26,6 +26,5 @@ O primeiro login com senha inicial funciona independentemente do envio de e-mail
 | --- | --- | --- |
 | Cliente A | `11900000001` | **Entrar → Já tenho conta por celular** |
 | Cliente B | `11900000002` | **Entrar → Já tenho conta por celular** |
-| Profissional temporário | `11900000003` | **Área do profissional → Já tenho conta por celular** |
 
-O operador autorizado consulta as senhas em uma sessão administrativa privada antes de compartilhar a tela. Deixe cada conta em um perfil de navegador separado. Use o cliente A para enviar e acompanhar o pedido e o B para mostrar o isolamento entre contas. Use dados fictícios nos pedidos e encerre as três sessões ao final. [Procedimento do operador](operacao-aws.md#contas-acadêmicas).
+O operador autorizado consulta as senhas dos clientes em uma sessão administrativa privada antes de compartilhar a tela. Use o cliente A para enviar e acompanhar o pedido, o cliente B para mostrar o isolamento e a conta do titular para operar a agenda. Deixe as três contas em perfis de navegador separados e encerre as sessões ao final. [Procedimento do operador](operacao-aws.md#contas-acadêmicas).

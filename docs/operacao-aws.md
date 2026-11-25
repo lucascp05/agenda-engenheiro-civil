@@ -51,6 +51,8 @@ O procedimento verificado em 24/11/2026 usou AWS Systems Manager para operar a E
 
 Na verificação de 24/11/2026, ambos os contêineres reportaram `51d1c8960f786648369cc57ef0a3dd64b3311084`, os dois domínios responderam HTTP 200 e `/saude` retornou `{"ok":true}`. `/auth/recursos` retornou `{"emailDisponivel":false}`. A seta **Voltar** e o acesso da demonstração a **Pedidos** e **Agenda** foram verificados no site público.
 
+Na publicação de 25/11/2026, ambos os contêineres reportaram `12adb921552d94543bb7adeca98b1d6e4be821e2`. O dump foi guardado na EC2 em diretório privado, com checksum SHA-256 conferido. A restauração isolada manteve 8 contas, 5 pedidos e 5 visitas, com os mesmos identificadores e vínculos antes e após a migração. O Chrome público confirmou o primeiro acesso do titular até **Trocar senha**. A API continuou sinalizando envio de e-mail indisponível após a publicação. [Evidências da API](api.md#captura-na-api-pública) · [PR #10](https://github.com/lucascp05/agenda-engenheiro-civil/pull/10).
+
 ### Diagnóstico e falha de publicação
 
 - Se o SSM falhar, confirme o estado da EC2, a sessão do Learner Lab e a resposta de um comando de leitura. Uma identidade válida no STS pode continuar sem permissão para `ssm:SendCommand`. Registre a mensagem da AWS.
@@ -79,7 +81,7 @@ A publicação de `51d1c89` manteve as imagens e os arquivos Compose anteriores 
 
 ## Contas acadêmicas
 
-Em uma sessão administrativa privada, consulte `DEMO_CLIENTE_A_SENHA` e `DEMO_CLIENTE_B_SENHA` em `/opt/agenda/.demonstracao.env`, e `DEMO_PROF_SENHA` em `/opt/agenda/.profissional-demonstracao.env`. Se for necessário reprovisionar os dois clientes, carregue o arquivo privado e execute o [seed acadêmico](../backend/src/demonstracao.ts). Ele cria somente as contas fictícias de cliente.
+Em uma sessão administrativa privada, consulte `DEMO_CLIENTE_A_SENHA` e `DEMO_CLIENTE_B_SENHA` em `/opt/agenda/.demonstracao.env`. Se for necessário reprovisionar os dois clientes, carregue o arquivo privado e execute o [seed acadêmico](../backend/src/demonstracao.ts). Ele cria somente as contas fictícias de cliente. Desde a transição de 25/11/2026, a apresentação usa a conta do titular para administrar a agenda.
 
 ```sh
 set -a
