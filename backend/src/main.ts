@@ -3,19 +3,20 @@ import 'reflect-metadata';
 import {
   BadRequestException, Body, CanActivate, ConflictException, Controller, createParamDecorator,
   ExecutionContext, ForbiddenException, Get, HttpCode, HttpException, Injectable, Module, NotFoundException, Param,
-  ParseUUIDPipe, Post, Query, Res, UnauthorizedException, UseGuards, ValidationPipe, type ValidationError,
+  ParseUUIDPipe, Post, Query, Res, SetMetadata, UnauthorizedException, UseGuards, ValidationPipe, type ValidationError,
 } from '@nestjs/common';
-import { NestFactory } from '@nestjs/core';
+import { NestFactory, Reflector } from '@nestjs/core';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import { Papel, Prisma, Situacao } from '@prisma/client';
 import helmet from 'helmet';
 import { Db } from './db';
 import { Email } from './email';
-import { CadastroDto, EmailDto, FiltrosDto, LoginDto, MensagemDto, PedidoDto, PerfilProfissionalDto, SenhaEmailDto, TokenEmailDto, RemarcacaoDto, VisitaDto } from './dto';
+import { CadastroDto, EmailDto, FiltrosDto, LoginDto, MensagemDto, PedidoDto, PerfilProfissionalDto, SenhaEmailDto, TokenEmailDto, TrocaSenhaDto, RemarcacaoDto, VisitaDto } from './dto';
 import { gerarHash, hashLegado, hashReserva, verificarSenha } from './senha';
 import { LimiteAcesso, type RespostaComCabecalho } from './limite-acesso';
 
-type Sessao = { sub: string; papel: Papel; id: string; profissionalAutorizado: boolean };
+type Sessao = { sub: string; papel: Papel; id: string; ver: number; profissionalAutorizado: boolean };
+const PermitirSenhaInicial = () => SetMetadata('permitirSenhaInicial', true);
 type TokenSessao = { sub: string; jti: string; ver: number };
 const Usuario = createParamDecorator((_, contexto: ExecutionContext) =>
   contexto.switchToHttp().getRequest().usuario as Sessao);
@@ -57,7 +58,7 @@ const duracaoSessao = 8 * 60 * 60;
 
 @Injectable()
 class Autenticacao implements CanActivate {
-  constructor(private jwt: JwtService, private db: Db) {}
+  constructor(private jwt: JwtService, private db: Db, private reflector: Reflector) {}
 
   async canActivate(contexto: ExecutionContext) {
     const req = contexto.switchToHttp().getRequest();
@@ -69,12 +70,15 @@ class Autenticacao implements CanActivate {
     const sessao = await this.db.sessaoAcesso.findUnique({
       where: { id: dados.jti },
       select: { contaId: true, expiraEm: true, conta: { select: {
-        papel: true, versaoSessao: true,
+        papel: true, versaoSessao: true, trocarSenha: true,
       } } },
     });
     if (!sessao || sessao.contaId !== dados.sub || sessao.expiraEm <= new Date() || sessao.conta.versaoSessao !== dados.ver) throw invalida();
+    if (sessao.conta.trocarSenha && !this.reflector.get('permitirSenhaInicial', contexto.getHandler())) {
+      throw new ForbiddenException('Troque a senha inicial para continuar.');
+    }
     const usuario: Sessao = {
-      id: dados.jti, sub: sessao.contaId, papel: sessao.conta.papel,
+      id: dados.jti, sub: sessao.contaId, papel: sessao.conta.papel, ver: dados.ver,
       profissionalAutorizado: ehProprietario(sessao.contaId, sessao.conta.papel),
     };
     req.usuario = usuario;
@@ -158,7 +162,7 @@ class Acesso {
     if (hashLegado(conta.hash)) {
       await this.db.conta.updateMany({ where: { id, hash: conta.hash }, data: { hash: await gerarHash(dados.senha) } });
     }
-    return this.sessao({ id, nome, celular, email, papel }, conta.versaoSessao);
+    return this.sessao({ id, nome, celular, email, papel }, conta.versaoSessao, conta.trocarSenha);
   }
 
   @Post('auth/vincular-email')
@@ -166,6 +170,7 @@ class Acesso {
   @UseGuards(Autenticacao, LimitePorIp)
   async vincularEmail(@Usuario() usuario: Sessao, @Body() dados: EmailDto, @Res({ passthrough: true }) res: RespostaComCabecalho) {
     exigirAcessoAosPedidos(usuario);
+    if (dados.email === emailProprietario) throw new ConflictException('Este e-mail está reservado.');
     this.limites.consumir('vinculo-conta:' + usuario.sub, 5, res);
     this.limites.consumir('vinculo-email:' + dados.email, 5, res);
     const conta = await this.db.conta.findUniqueOrThrow({ where: { id: usuario.sub } });
@@ -181,6 +186,7 @@ class Acesso {
     try {
       const conta = await this.db.$transaction(async tx => {
         const registro = await this.email.consumir(tx, dados.token, 'VINCULO', usuario.sub);
+        if (registro.email === emailProprietario) throw new ConflictException('Este e-mail está reservado.');
         const where = { id: usuario.sub, email: null, versaoSessao: registro.versao! };
         if (!(await tx.conta.updateMany({ where, data: { email: registro.email } })).count) {
           throw new ConflictException('Esta conta já tem um e-mail vinculado ou o link venceu.');
@@ -201,7 +207,7 @@ class Acesso {
     this.email.exigirDisponibilidade();
     this.limites.consumir('recuperacao-email:' + dados.email, 5, res);
     const conta = await this.db.conta.findUnique({ where: { email: dados.email } });
-    if (conta) {
+    if (conta && !conta.trocarSenha) {
       await this.email.enviar({ finalidade: 'RECUPERACAO', email: dados.email, contaId: conta.id, versao: conta.versaoSessao })
         .catch(() => console.warn('Não foi possível enviar um e-mail de recuperação.'));
     }
@@ -214,7 +220,7 @@ class Acesso {
   async redefinirSenha(@Body() dados: SenhaEmailDto) {
     await this.db.$transaction(async tx => {
       const registro = await this.email.consumir(tx, dados.token, 'RECUPERACAO');
-      const where = { id: registro.contaId!, email: registro.email, versaoSessao: registro.versao! };
+      const where = { id: registro.contaId!, email: registro.email, versaoSessao: registro.versao!, trocarSenha: false };
       const resultado = await tx.conta.updateMany({
         where, data: { hash: await gerarHash(dados.senha), versaoSessao: { increment: 1 } },
       });
@@ -274,19 +280,41 @@ class Acesso {
 
   @Post('auth/sair')
   @HttpCode(204)
+  @PermitirSenhaInicial()
   @UseGuards(Autenticacao)
   async sair(@Usuario() usuario: Sessao) {
     await this.db.sessaoAcesso.deleteMany({ where: { id: usuario.id, contaId: usuario.sub } });
   }
 
-  private async sessao(conta: { id: string; nome: string; celular: string | null; email: string | null; papel: Papel }, ver: number) {
+  @Post('auth/trocar-senha')
+  @HttpCode(204)
+  @PermitirSenhaInicial()
+  @UseGuards(Autenticacao, LimitePorIp)
+  async trocarSenha(@Usuario() usuario: Sessao, @Body() dados: TrocaSenhaDto) {
+    exigirProfissional(usuario);
+    const conta = await this.db.conta.findUniqueOrThrow({ where: { id: usuario.sub } });
+    if (conta.versaoSessao !== usuario.ver) throw new UnauthorizedException('Sua sessão terminou. Entre novamente.');
+    if (!await verificarSenha(dados.senhaAtual, conta.hash)) throw new BadRequestException('Senha atual incorreta.');
+    if (dados.senha === dados.senhaAtual) throw new BadRequestException('Escolha uma senha diferente da atual.');
+    const hash = await gerarHash(dados.senha);
+    await this.db.$transaction(async tx => {
+      const alteradas = await tx.conta.updateMany({
+        where: { id: usuario.sub, versaoSessao: usuario.ver, hash: conta.hash },
+        data: { hash, trocarSenha: false, versaoSessao: { increment: 1 } },
+      });
+      if (!alteradas.count) throw new UnauthorizedException('Sua sessão terminou. Entre novamente.');
+      await tx.sessaoAcesso.deleteMany({ where: { contaId: usuario.sub } });
+    });
+  }
+
+  private async sessao(conta: { id: string; nome: string; celular: string | null; email: string | null; papel: Papel }, ver: number, trocarSenha = false) {
     const agora = new Date();
     const expiraEm = new Date(agora.getTime() + duracaoSessao * 1000);
     const [, { id }] = await this.db.$transaction([
       this.db.sessaoAcesso.deleteMany({ where: { expiraEm: { lte: agora } } }),
       this.db.sessaoAcesso.create({ data: { contaId: conta.id, expiraEm }, select: { id: true } }),
     ]);
-    return { conta: { ...conta, profissional: ehProprietario(conta.id, conta.papel) }, expiraEm, token: await this.jwt.signAsync({ sub: conta.id, jti: id, ver }) };
+    return { conta: { ...conta, profissional: ehProprietario(conta.id, conta.papel), ...(trocarSenha && { trocarSenha }) }, expiraEm, token: await this.jwt.signAsync({ sub: conta.id, jti: id, ver }) };
   }
 }
 

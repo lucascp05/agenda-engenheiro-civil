@@ -118,3 +118,46 @@ test('migração preserva dados e o convite libera somente o titular', {timeout:
   assert.equal((await req('/pedidos', {token:novoAcesso.token}))[0].id, pedido);
   assert.equal((await req('/visitas', {token:novoAcesso.token}))[0].id, visita);
 });
+
+test('provisionamento por stdin e troca obrigatória sem serviço de e-mail', async t => {
+  const db = new PrismaClient();
+  t.after(() => db.$disconnect());
+  const celular = '849' + randomBytes(4).readUInt32BE().toString().padStart(8, '0').slice(-8);
+  const email = randomUUID() + '@example.test';
+  const dono = await db.conta.create({data:{nome:nomeCompleto, celular, papel:'ENGENHEIRO', hash:await senhaApi.gerarHash(senha)}});
+  const env = {
+    ...process.env, AGENDA_OWNER_ID:dono.id, AGENDA_OWNER_EMAIL:email, AGENDA_OWNER_NAME:nomeCompleto,
+    AGENDA_OWNER_PHONE:celular, RESEND_API_KEY:'', EMAIL_FROM:'', EMAIL_TEST_URL:'',
+  };
+  const {base} = await iniciarApi(t, env);
+  const req = requisicoes(base);
+  const anterior = await req('/auth/login', {body:{celular,senha}});
+  const temporaria = 'Senha fictícia inicial';
+  function provisionar() {
+    return spawnSync(process.execPath, ['dist/titular.js'], {env, input:temporaria, encoding:'utf8'}).status;
+  }
+  assert.equal(provisionar(), 0);
+  assert.equal(provisionar(), 0);
+  await req('/visitas', {token:anterior.token,status:401});
+  await req('/auth/login', {body:{celular,senha},status:401});
+  const entrar = (senha, status = 201) => req('/auth/login', {body:{email,senha},status});
+  const primeiro = await entrar(temporaria);
+  const outro = await entrar(temporaria);
+  assert.equal(primeiro.conta.id, dono.id);
+  assert.equal(primeiro.conta.profissional, true);
+  assert.equal(primeiro.conta.trocarSenha, true);
+  await req('/pedidos', {token:primeiro.token,status:403});
+  await req('/visitas', {token:primeiro.token,status:403});
+  const nova = 'Nova senha definitiva fictícia';
+  const trocar = (senhaAtual, senha, status) =>
+    req('/auth/trocar-senha', {token:primeiro.token,body:{senhaAtual,senha},status});
+  await trocar(senha, nova, 400);
+  await trocar(temporaria, temporaria, 400);
+  await trocar(temporaria, nova, 204);
+  for (const sessao of [primeiro, outro]) await req('/visitas', {token:sessao.token,status:401});
+  await entrar(temporaria, 401);
+  const renovado = await entrar(nova);
+  assert.equal(renovado.conta.trocarSenha, undefined);
+  await req('/visitas', {token:renovado.token});
+  assert.equal(provisionar(), 1);
+});

@@ -35,6 +35,14 @@ export class LoginDto {
   senha!: string;
 }
 
+export class TrocaSenhaDto {
+  @IsString() @Length(8, 128)
+  senhaAtual!: string;
+
+  @IsString() @Length(15, 128, { message: 'Escolha uma senha de 15 a 128 caracteres.' })
+  senha!: string;
+}
+
 export class TokenEmailDto {
   @Matches(/^[a-f0-9]{64}$/)
   token!: string;
