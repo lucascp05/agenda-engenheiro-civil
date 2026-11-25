@@ -27,7 +27,7 @@ test('fluxo real, permissões, filtros e agendamento concorrente', async t => {
     assert.equal(cadastro.conta.celular, null);
     assert.equal(cadastro.conta.papel, 'CLIENTE');
     assert.equal(cadastro.conta.profissional, false);
-    return (await req('/auth/login', {body: {email, senha}})).token;
+    return { email, token: (await req('/auth/login', {body: {email, senha}})).token };
   }
 
   await req('/saude');
@@ -35,10 +35,14 @@ test('fluxo real, permissões, filtros e agendamento concorrente', async t => {
   const acessoEngenheiro = await req('/auth/login', {body: {celular, senha}});
   assert.equal(acessoEngenheiro.conta.profissional, true);
   const engenheiro = acessoEngenheiro.token;
-  const primeiro = await cliente('Cliente Demo A');
-  const segundo = await cliente('Cliente Demo B');
+  const { email: emailPrimeiro, token: sessaoInicial } = await cliente('Cliente Demo A');
+  const { token: segundo } = await cliente('Cliente Demo B');
   const dados = {servico: 'Topografia', celular: '(84) 90000-1234', link: 'https://example.test/local', municipio: 'Mossoró', comunidade: 'Sítio Demo', local: 'Entrada da comunidade', descricao: 'Levantamento do terreno fictício'};
-  const a = await req('/pedidos', {token: primeiro, body: dados});
+  const a = await req('/pedidos', {token: sessaoInicial, body: dados});
+  await req('/auth/sair', {token: sessaoInicial, body: {}, status: 204});
+  await req('/pedidos/' + a.id, {token: sessaoInicial, status: 401});
+  const primeiro = (await req('/auth/login', {body: {email: emailPrimeiro, senha}})).token;
+  assert.equal((await req('/pedidos/' + a.id, {token: primeiro})).id, a.id);
   const b = await req('/pedidos', {token: segundo, body: {...dados, comunidade: 'Outro sítio'}});
   assert.equal(a.situacao, 'RECEBIDO');
   assert.equal(a.celular, '84900001234');
