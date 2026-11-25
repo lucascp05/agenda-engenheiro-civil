@@ -39,6 +39,8 @@ O procedimento verificado em 24/11/2026 usou AWS Systems Manager para operar a E
    compose_release up -d --no-deps --no-build --wait api web
    ```
 
+   Para uma revisão que muda a rede do banco, depois do backup e do ensaio isolado, execute também `compose_release up -d --no-deps --no-build --wait db` antes de atualizar a API. Use o mesmo projeto `agenda` para manter o volume `pgdata`. No retorno de uma mudança de rede, reaplique o banco e a API com a configuração anterior.
+
 5. Compare as revisões dos contêineres com `origin/main`. Confira o frontend, a API e a demonstração antes de considerar a publicação concluída.
 
    ```sh

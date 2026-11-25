@@ -13,6 +13,7 @@ Projeto individual de Sistemas Distribuídos da UFERSA, de **Lucas Assis da Cost
 - [Arquitetura](docs/arquitetura.md) para seguir os dados entre as três camadas.
 - [Referência da API](docs/api.md) para consultar rotas, permissões e exemplos HTTP.
 - [Operação na AWS](docs/operacao-aws.md) para publicar, verificar revisões e diagnosticar falhas.
+- [Roteiro da apresentação](docs/apresentacao.md) com o caminho do pedido à visita, os requisitos e perguntas para revisão.
 
 O cadastro público, o reenvio de confirmação e a recuperação de senha precisam de um remetente verificado no Resend. Consulte [o estado da API pública](https://api.lucas.grupo-04.sd.ufersa.dev.br/auth/recursos). Quando `emailDisponivel` é `false`, contas existentes ainda podem entrar com suas credenciais, inclusive pela **Área do profissional**.
 
