@@ -27,7 +27,7 @@ O procedimento verificado em 24/11/2026 usou AWS Systems Manager para operar a E
      --build-arg "VITE_API_URL=$VITE_API_URL" -t "agenda-academica-web:$REVISAO" frontend
    ```
 
-4. No release, prepare `imagens.yaml` com `services.api.image` e `services.web.image` iguais às tags compiladas. Na publicação acadêmica, mantenha `services.api.environment.AGENDA_OWNER_EMAIL` vazio e preserve a seleção da conta de demonstração em `AGENDA_OWNER_ID`. Use o arquivo de ambiente privado da publicação. No host verificado, ele fica em `/opt/agenda/.env`.
+4. No release, prepare `imagens.yaml` com `services.api.image` e `services.web.image` iguais às tags compiladas. Preserve a seleção profissional durante a validação das imagens. Use o arquivo de ambiente privado da publicação. No host verificado, ele fica em `/opt/agenda/.env`.
 
    ```sh
    compose_release() {
@@ -69,7 +69,7 @@ docker exec -i agenda-db-1 pg_restore -l < agenda-antes-do-deploy.dump
 
 ## Migração
 
-O [Dockerfile da API](../backend/Dockerfile) executa `prisma migrate deploy` antes de iniciar o NestJS. Em um banco isolado, pode-se restaurar o dump e aplicar as migrações com a nova imagem. Consulte `_prisma_migrations` e compare as contagens e os vínculos de contas, pedidos e visitas. As [quatro migrações](../backend/prisma/migrations) criam a estrutura inicial, adicionam sessões, registram o perfil profissional e acrescentam contas por e-mail e tokens.
+O [Dockerfile da API](../backend/Dockerfile) executa `prisma migrate deploy` antes de iniciar o NestJS. Restaure o dump em um banco isolado e aplique as migrações com a nova imagem. Consulte `_prisma_migrations` e compare as contagens e os vínculos de contas, pedidos e visitas. As [migrações](../backend/prisma/migrations) incluem a coluna `Conta.trocarSenha`, cujo padrão é `false` para as contas existentes.
 
 A publicação anterior de 24/11/2026 registrou backup e comparação de contagens após migração. A suíte local [profissionais.mjs](../backend/test/profissionais.mjs) confirmou a atualização a partir das três primeiras migrações com dados fictícios. Uma cópia da base foi restaurada na prévia isolada. O PR #8 não acrescentou migração.
 
@@ -88,4 +88,12 @@ set +a
 docker exec -e DEMO_CLIENTE_A_SENHA -e DEMO_CLIENTE_B_SENHA agenda-api-1 npm run seed:demonstracao
 ```
 
-A ativação definitiva depende de um remetente verificado em `EMAIL_FROM`, acesso de envio via `RESEND_API_KEY` e teste de entrega real em uma caixa autorizada. Depois disso, configure na prévia `AGENDA_OWNER_ID` com a conta preservada e `AGENDA_OWNER_EMAIL` com o endereço do titular. Confirme com ele o acesso a **Pedidos** e **Agenda** antes de trocar o titular em produção. A demonstração usa a configuração confirmada de 24/11/2026 enquanto essa validação estiver pendente. [Variáveis do projeto](../.env.example) · [API de envio do Resend](https://resend.com/docs/api-reference/emails/send-email).
+## Provisionar o titular
+
+Confirme o identificador da conta profissional existente e ensaie o provisionamento e a troca de senha na prévia isolada. O [comando administrativo](../backend/src/titular.ts) usa `AGENDA_OWNER_ID`, `AGENDA_OWNER_EMAIL`, `AGENDA_OWNER_NAME` e `AGENDA_OWNER_PHONE`. Ele atualiza a conta pelo mesmo identificador, revoga suas sessões e exige a troca no próximo login. Uma conta já vinculada com outra credencial exige investigação prévia.
+
+Na sessão administrativa privada, com a migração aplicada e as variáveis do titular definidas, forneça a senha inicial pela entrada padrão de `npm run provisionar:titular`. Leia o valor com entrada sem eco ou por um canal privado que faça o pipe diretamente. Mantenha a senha fora de argumentos, variáveis de ambiente, arquivos de configuração e logs. Em produção, confira o login até **Trocar senha** e deixe a alteração para o titular. Coordene a mudança com a apresentação se a demonstração usar o mesmo identificador.
+
+## Validar envio de e-mail
+
+Configure `EMAIL_FROM` com o remetente de um domínio verificado no Resend e `RESEND_API_KEY` com acesso de envio no arquivo privado da publicação. Depois da troca da API, confira `/auth/recursos` e percorra cadastro e recuperação com uma caixa de teste autorizada. Confirme a chegada das mensagens e a abertura de cada link no domínio público. [Variáveis do projeto](../.env.example) · [API de envio do Resend](https://resend.com/docs/api-reference/emails/send-email).
