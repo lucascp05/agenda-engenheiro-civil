@@ -35,6 +35,7 @@ model Conta {
   papel   Papel    @default(CLIENTE)
   pedidos Pedido[]
   versaoSessao Int @default(0)
+  trocarSenha Boolean @default(false)
   sessoes SessaoAcesso[]
   perfilProfissional PerfilProfissional? @relation("Solicitante")
   revisoesProfissionais PerfilProfissional[] @relation("Revisor")

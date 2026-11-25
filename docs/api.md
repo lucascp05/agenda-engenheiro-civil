@@ -1,4 +1,4 @@
-# Referência da API
+Renovei o perfil learner-lab e o teste do STS funcionou. Retome de onde parou, confira o acesso à EC2 em us-east-1 e continue a publicação e os testes no site público.# Referência da API
 
 Base pública da API em [api.lucas.grupo-04.sd.ufersa.dev.br](https://api.lucas.grupo-04.sd.ufersa.dev.br/saude). Em execução local, use `http://localhost:3000`. Os caminhos a seguir são relativos à base.
 
@@ -23,6 +23,7 @@ O token dos links de e-mail é enviado no JSON das operações de confirmação.
 | `POST /auth/confirmar-email` | Público com token de cadastro | **201** com a sessão de cliente. **400** para token inválido, expirado ou usado. **409** se houver conflito com conta ou endereço reservado. |
 | `POST /auth/login` | Público | **201** com sessão. **400** para identificadores ausentes ou incompatíveis. **401** para credenciais incorretas. **429** ao exceder tentativas. |
 | `POST /auth/sair` | Conta com sessão válida | **204** após revogar a sessão. **401** para sessão ausente ou inválida. |
+| `POST /auth/trocar-senha` | Titular com sessão válida | Recebe `senhaAtual` e `senha` de 15 a 128 caracteres. **204** após salvar e revogar todas as sessões da conta. **400** se a senha atual estiver incorreta ou se a nova for igual à atual. |
 | `POST /auth/vincular-email` | Cliente ou profissional autorizado com sessão | **202** após enviar o link. **409** se a conta já tiver e-mail. **503** se o envio estiver indisponível. |
 | `POST /auth/confirmar-vinculo` | Conta que solicitou o vínculo, com sessão ativa e token | **201** com `conta`. **400** se o token for inválido ou de outra conta. **409** para conflito de vínculo. |
 | `POST /auth/recuperacao` | Público | **202** com a mesma mensagem para endereços existentes e desconhecidos. **503** sem envio configurado. |
@@ -30,7 +31,7 @@ O token dos links de e-mail é enviado no JSON das operações de confirmação.
 | `POST /auth/convite-profissional` | Público | **202** com mensagem genérica. Só envia ao endereço autorizado quando o titular selecionado está sem e-mail vinculado e o envio está disponível. Pode devolver **429** por limite de IP. |
 | `POST /auth/ativar-profissional` | Público com convite do titular selecionado | **204** após vincular o e-mail, salvar a senha e revogar as sessões da conta. **400** para convite inválido, **403** sem titular e **409** se o e-mail pertencer a outra conta. |
 
-As confirmações de cadastro, recuperação e ativação recebem `token` e `senha` de 15 a 128 caracteres. A confirmação de vínculo recebe apenas `token`. Consulte as [validações de entrada](../backend/src/dto.ts) e os [testes de autenticação](../backend/test/seguranca.mjs).
+As confirmações de cadastro, recuperação e ativação recebem `token` e `senha` de 15 a 128 caracteres. A confirmação de vínculo recebe apenas `token`. No primeiro acesso com senha temporária, o login inclui `conta.trocarSenha: true`. A sessão permite trocar a senha e sair. As demais rotas protegidas devolvem **403** até a troca. Depois da troca, os tokens anteriores recebem **401**. Consulte as [validações de entrada](../backend/src/dto.ts) e os [testes de autenticação](../backend/test/seguranca.mjs).
 
 ## Perfil profissional
 
@@ -55,6 +56,32 @@ As confirmações de cadastro, recuperação e ativação recebem `token` e `sen
 | `GET /visitas` | Profissional autorizado | **200** com visitas de pedidos em `MARCADO`, ordenadas por horário. |
 
 Rotas protegidas devolvem **401** sem sessão válida. Com sessão válida, um cliente que envie um corpo válido a `POST /visitas` recebe **403**. Ao tentar consultar o UUID de outro cliente, recebe **404**, assim como para um pedido inexistente. Os três casos são cobertos pelo [teste de integração](../backend/test/e2e.mjs). Operações sobre um pedido existente também podem devolver **409** quando o estado mudou desde a leitura.
+
+## Captura local no Chrome
+
+Respostas da API NestJS com dados fictícios gravados em PostgreSQL descartável em 25/11/2026. Os trechos mostram a criação e o agendamento do mesmo pedido.
+
+`POST /pedidos` → **201 Created**
+
+```json
+{"id":"d2349d14-b56c-48ea-a50a-16463266c443","situacao":"RECEBIDO","visita":null}
+```
+
+`POST /visitas` → **201 Created**
+
+```json
+{
+  "id": "d2349d14-b56c-48ea-a50a-16463266c443",
+  "situacao": "MARCADO",
+  "visita": {
+    "id": "b0d11577-f88e-47f5-b914-880c9b1e3319",
+    "pedidoId": "d2349d14-b56c-48ea-a50a-16463266c443",
+    "horario": "2035-02-10T16:00:00.000Z"
+  }
+}
+```
+
+Após a remarcação, o cliente entrou novamente e viu **14:00, horário de Brasília**, equivalente a `2035-02-10T17:00:00.000Z`.
 
 ## Exemplo de solicitação e agendamento
 

@@ -2,7 +2,7 @@ import { cloneElement, useEffect, useId, useState, type FormEvent, type ReactEle
 import { createRoot } from 'react-dom/client';
 import './style.css';
 
-type Conta = { nome: string; celular: string | null; email?: string | null; profissional?: boolean; papel: 'CLIENTE' | 'ENGENHEIRO' | 'ADMIN' };
+type Conta = { nome: string; celular: string | null; email?: string | null; profissional?: boolean; trocarSenha?: boolean; papel: 'CLIENTE' | 'ENGENHEIRO' | 'ADMIN' };
 type Sessao = { conta: Conta; token: string; expiraEm: string };
 type Situacao = 'RECEBIDO' | 'INFORMACOES' | 'MARCADO' | 'CONCLUIDO';
 type Lugar = { municipio: string; comunidade?: string; local: string };
@@ -212,6 +212,10 @@ function Capa({ pedir, acompanhar }: { pedir: () => void; acompanhar: () => void
       <h2>Como funciona</h2>
       <ol className="fluxo">{etapas.map(([titulo, descricao]) => <li key={titulo}><h3>{titulo}</h3><p>{descricao}</p></li>)}</ol>
     </section>
+    <section className="secao-capa painel quem-atende">
+      <h2>Contato</h2>
+      <a className="secundario" href="https://wa.me/5583981421864" target="_blank" rel="noreferrer">Falar pelo WhatsApp</a>
+    </section>
   </>;
 }
 
@@ -235,8 +239,8 @@ function NovoPedido({ enviar }: { enviar: (dados: object) => Promise<void> }) {
     <Formulario titulo="Enviar pedido" enviar={enviar}>{erro => <>
       <Campo nome="servico" rotulo="Tipo de serviço" erro={erro}><select name="servico" required defaultValue=""><option value="" disabled>Selecione um serviço</option>{servicos.map(s => <option key={s}>{s}</option>)}</select></Campo>
       <Campo nome="municipio" rotulo="Em qual município fica o imóvel?" erro={erro}><input name="municipio" required minLength={2} maxLength={90}/></Campo>
-      <Campo nome="comunidade" rotulo="Comunidade ou localidade (opcional)" erro={erro}><input name="comunidade" minLength={2} maxLength={100}/></Campo>
-      <Campo nome="local" rotulo="Como chegar?" erro={erro}><input name="local" required minLength={3} maxLength={160} placeholder="Estrada, endereço ou ponto de referência"/></Campo>
+      <Campo nome="comunidade" rotulo="Comunidade ou endereço" erro={erro}><input name="comunidade" required minLength={2} maxLength={100}/></Campo>
+      <Campo nome="local" rotulo="Referência de acesso" erro={erro}><input name="local" required minLength={3} maxLength={160} placeholder="Ex.: porteira depois do galpão"/></Campo>
       <Campo nome="descricao" rotulo="O que você precisa?" erro={erro}><textarea name="descricao" required minLength={3} maxLength={400} rows={3}/></Campo>
       <Campo nome="celular" rotulo="Celular com DDD para combinar a visita (opcional)" erro={erro}><input name="celular" type="tel" autoComplete="tel-national" maxLength={20}/></Campo>
       <Campo nome="link" rotulo="Link de localização (opcional)" erro={erro}><input type="url" name="link" maxLength={500} placeholder="https://"/></Campo>
@@ -262,6 +266,8 @@ function CartaoPedido({ pedido, engenheiro, mudar }: { pedido: Pedido; engenheir
       <span>Horário de Brasília</span>
     </div>}
     {!engenheiro && pedido.situacao === 'RECEBIDO' && <p className="orientacao">Aguarde a resposta do engenheiro e volte aqui para acompanhar.</p>}
+    {!engenheiro && pedido.situacao === 'INFORMACOES' && <p className="orientacao">Responda à última mensagem para o engenheiro continuar o atendimento.</p>}
+    {!engenheiro && pedido.situacao === 'MARCADO' && <p className="orientacao">Prepare o acesso ao imóvel para o dia e horário confirmados.</p>}
     {engenheiro && pedido.situacao === 'RECEBIDO' && <p className="orientacao">{ultimaMensagem?.autor === 'CLIENTE' ? 'O cliente respondeu' : 'Novo pedido'}</p>}
     {engenheiro && <p><strong>{pedido.cliente.nome}</strong>
       {celular && <> · <a href={'tel:+55' + celular}>{celular.replace(/^(\d{2})(\d{5})(\d{4})$/, '($1) $2-$3')}</a></>}
@@ -351,18 +357,37 @@ function App() {
     return () => controller.abort();
   }, []);
   const [link, setLink] = useState(lerLinkEmail);
-  const [tela, setTela] = useState<Tela>(link ? 'email' : sessao?.conta.profissional ? 'pedidos' : 'inicio');
+  const [navegacao, setNavegacao] = useState<{ tela: Tela; cadastro: boolean }>(() =>
+    link ? { tela: 'email', cadastro: false } : history.state?.agenda ??
+      { tela: sessao?.conta.profissional ? 'pedidos' : 'inicio', cadastro: false });
+  const engenheiro = sessao?.conta.profissional === true;
+  const trocaObrigatoria = engenheiro && sessao?.conta.trocarSenha;
+  const pagina = navegacao.tela;
+  const tela = trocaObrigatoria ? 'conta' : pagina === 'acesso-profissional' && engenheiro ? 'pedidos'
+    : (pagina === 'perfil' || pagina === 'agenda') && !engenheiro ? 'acesso-profissional'
+      : pagina === 'conta' && !sessao ? 'pedidos' : pagina === 'email' && !link ? 'inicio' : pagina;
   useEffect(() => {
     function abrirLink() {
       const novo = lerLinkEmail();
       if (!novo) return;
-      history.replaceState(null, '', location.pathname + location.search);
+      const agenda = { tela: 'email' as const, cadastro: false };
+      history.replaceState({ agenda }, '', location.pathname + location.search);
       setLink(novo);
-      setTela('email');
+      setNavegacao(agenda);
     }
+    history.replaceState({ agenda: navegacao }, '');
     abrirLink();
     window.addEventListener('hashchange', abrirLink);
-    return () => window.removeEventListener('hashchange', abrirLink);
+    function voltarOuAvancar() {
+      setNavegacao(history.state?.agenda ?? { tela: 'inicio', cadastro: false });
+      setErro('');
+      setAviso('');
+    }
+    window.addEventListener('popstate', voltarOuAvancar);
+    return () => {
+      window.removeEventListener('hashchange', abrirLink);
+      window.removeEventListener('popstate', voltarOuAvancar);
+    };
   }, []);
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [visitas, setVisitas] = useState<Visita[]>([]);
@@ -371,11 +396,9 @@ function App() {
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState('');
   const [aviso, setAviso] = useState('');
-  const [cadastroDireto, setCadastroDireto] = useState(false);
   const [saindo, setSaindo] = useState(false);
   const [perfil, setPerfil] = useState<PerfilProfissional | null>();
   const cliente = sessao?.conta.papel === 'CLIENTE';
-  const engenheiro = sessao?.conta.profissional === true;
 
   function limparSessao(expirada = false) {
     const destino = tela === 'email' && link?.acao === 'VINCULO' ? 'email'
@@ -386,7 +409,7 @@ function App() {
     setVisitas([]);
     setFiltros('');
     setPerfil(undefined);
-    ir(expirada ? destino : 'inicio');
+    ir(expirada ? destino : 'inicio', false, true);
     if (expirada) setAviso('Sua sessão terminou. Entre novamente para continuar.');
   }
 
@@ -404,11 +427,15 @@ function App() {
     }
   }
 
-  function ir(destino: Tela) {
+  function ir(destino: Tela, cadastro = false, substituir = false) {
     setErro('');
     setAviso('');
-    setCadastroDireto(false);
-    setTela(destino);
+    const agenda = { tela: destino, cadastro };
+    if (substituir) history.replaceState({ agenda }, '');
+    else if (history.state?.agenda?.tela !== destino || history.state?.agenda?.cadastro !== cadastro) {
+      history.pushState({ agenda }, '');
+    }
+    setNavegacao(agenda);
     window.scrollTo(0, 0);
   }
 
@@ -457,20 +484,18 @@ function App() {
     setVisitas([]);
     setFiltros('');
     salvarSessao(nova);
-    if (!vinculo) ir(nova.conta.profissional || tela !== 'novo' ? 'pedidos' : 'novo');
+    if (!vinculo) ir(nova.conta.trocarSenha ? 'conta' : nova.conta.profissional || tela !== 'novo' ? 'pedidos' : 'novo');
   }
 
   async function confirmarLink(dados: Record<string, string>) {
     if (!link) return;
     if (link.acao === 'CADASTRO') {
       const nova = await api<Sessao>('/auth/confirmar-email', undefined, { ...dados, token: link.token });
-      if (sessao) await api('/auth/sair', sessao.token, {}).catch(() => {});
-      salvarSessao(nova);
-      setFiltros('');
-      setPedidos([]);
-      setVisitas([]);
-      ir('novo');
-      setAviso('E-mail confirmado. Você já pode pedir atendimento.');
+      await Promise.all([nova, ...(sessao ? [sessao] : [])].map(acesso =>
+        api('/auth/sair', acesso.token, {}, AbortSignal.timeout(8000)).catch(() => {})));
+      limparSessao();
+      ir('novo', false, true);
+      setAviso('E-mail confirmado. Entre com seu e-mail e a senha que acabou de criar.');
     } else if (link.acao === 'RECUPERACAO' || link.acao === 'PROPRIETARIO') {
       const ativacao = link.acao === 'PROPRIETARIO';
       await api(ativacao ? '/auth/ativar-profissional' : '/auth/redefinir-senha', undefined, { ...dados, token: link.token });
@@ -492,7 +517,6 @@ function App() {
     catch (e) {
       if (e instanceof Falha && e.status === 401) {
         limparSessao(true);
-        if (tela === 'email') setTela('email');
       }
       throw e;
     }
@@ -523,7 +547,7 @@ function App() {
       <nav aria-label="Navegação principal">
         {!sessao && <>
           <button onClick={() => ir(tela === 'novo' ? 'novo' : 'pedidos')}>Entrar</button>
-          <button className="atalho-cadastro" onClick={() => { ir(tela === 'novo' ? 'novo' : 'pedidos'); setCadastroDireto(true); }}>Criar conta</button>
+          <button className="atalho-cadastro" onClick={() => ir(tela === 'novo' ? 'novo' : 'pedidos', true)}>Criar conta</button>
         </>}
         {cliente && <button aria-current={tela === 'pedidos' ? 'page' : undefined} onClick={() => ir('pedidos')}>Meus pedidos</button>}
         {engenheiro && <><button aria-current={tela === 'pedidos' ? 'page' : undefined} onClick={() => ir('pedidos')}>Pedidos</button><button aria-current={tela === 'agenda' ? 'page' : undefined} onClick={() => ir('agenda')}>Agenda</button></>}
@@ -535,7 +559,22 @@ function App() {
       {aviso && <p className="aviso" role="status">{aviso}</p>}
       {tela === 'inicio' && <Capa pedir={() => !sessao || cliente ? ir('novo') : abrirAreaProfissional()} acompanhar={() => !sessao || cliente ? ir('pedidos') : abrirAreaProfissional()}/>}
       {tela === 'acesso-profissional' && <Acesso key={tela} profissional entrar={entrar} voltar={() => ir('inicio')} emailDisponivel={emailDisponivel} conviteProfissionalDisponivel={conviteProfissionalDisponivel}/>}
-      {tela === 'conta' && sessao && <section className="painel estreito painel-formulario">
+      {trocaObrigatoria && <section className="painel estreito painel-formulario">
+        <h1>Trocar senha</h1>
+        <p>Defina sua senha para acessar a agenda.</p>
+        <Formulario titulo="Salvar nova senha" enviar={async dados => {
+          if (dados.senha !== dados.confirmacao) throw new Falha('As senhas precisam ser iguais.', { confirmacao: 'Repita a nova senha.' });
+          await enviar('/auth/trocar-senha', { senhaAtual: dados.senhaAtual, senha: dados.senha });
+          limparSessao();
+          ir('acesso-profissional', false, true);
+          setAviso('Senha alterada. Entre com seu e-mail e a nova senha.');
+        }}>{erro => <>
+          <Campo nome="senhaAtual" rotulo="Senha atual" erro={erro}><input name="senhaAtual" type="password" autoComplete="current-password" required maxLength={128}/></Campo>
+          <Campo nome="senha" rotulo="Nova senha (15 a 128 caracteres)" erro={erro}><input name="senha" type="password" autoComplete="new-password" required minLength={15} maxLength={128}/></Campo>
+          <Campo nome="confirmacao" rotulo="Confirme a nova senha" erro={erro}><input name="confirmacao" type="password" autoComplete="new-password" required minLength={15} maxLength={128}/></Campo>
+        </>}</Formulario>
+      </section>}
+      {tela === 'conta' && sessao && !trocaObrigatoria && <section className="painel estreito painel-formulario">
         <h1>Minha conta</h1>
         {sessao.conta.email ? <p>E-mail verificado: {sessao.conta.email}</p> :
           emailDisponivel === false ? <p>Vínculo por e-mail indisponível nesta versão.</p> :
@@ -565,7 +604,7 @@ function App() {
           }</Formulario>
         </section>}
       </>}
-      {!sessao && (tela === 'novo' || tela === 'pedidos') && <Acesso key={tela} entrar={entrar} voltar={() => ir('inicio')} destino={tela} cadastro={cadastroDireto} alternarCadastro={setCadastroDireto} emailDisponivel={emailDisponivel}/>}
+      {!sessao && (tela === 'novo' || tela === 'pedidos') && <Acesso key={tela + navegacao.cadastro} entrar={entrar} voltar={() => ir('inicio')} destino={tela} cadastro={navegacao.cadastro} alternarCadastro={cadastro => ir(tela, cadastro)} emailDisponivel={emailDisponivel}/>}
       {cliente && tela === 'novo' && <NovoPedido enviar={async dados => {
         await enviar('/pedidos', dados);
         ir('pedidos');
