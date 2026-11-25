@@ -14,6 +14,8 @@ Projeto individual de Sistemas Distribuídos da UFERSA, de **Lucas Assis da Cost
 - [Referência da API](docs/api.md) para consultar rotas, permissões e exemplos HTTP.
 - [Operação na AWS](docs/operacao-aws.md) para publicar, verificar revisões e diagnosticar falhas.
 
+O cadastro público, o reenvio de confirmação e a recuperação de senha precisam de um remetente verificado no Resend. Consulte [o estado da API pública](https://api.lucas.grupo-04.sd.ufersa.dev.br/auth/recursos). Quando `emailDisponivel` é `false`, contas existentes ainda podem entrar com suas credenciais, inclusive pela **Área do profissional**.
+
 ## Executar localmente
 
 Use Docker com Compose v2 e o motor do Docker em execução. Os comandos a seguir usam um shell compatível com Bash, como Git Bash no Windows. As portas locais 8080 e 3000 precisam estar livres. As imagens compilam a aplicação com Node.js 22.

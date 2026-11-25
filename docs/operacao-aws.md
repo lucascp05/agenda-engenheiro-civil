@@ -116,3 +116,9 @@ Compare o UUID da conta e os vínculos dos pedidos e visitas antes e depois do c
 ## Validar envio de e-mail
 
 Configure `EMAIL_FROM` com o remetente de um domínio verificado no Resend e `RESEND_API_KEY` com acesso de envio no arquivo privado da publicação. Depois da troca da API, confira `/auth/recursos` e percorra cadastro e recuperação com uma caixa de teste autorizada. Confirme a chegada das mensagens e a abertura de cada link no domínio público. [Variáveis do projeto](../.env.example) · [API de envio do Resend](https://resend.com/docs/api-reference/emails/send-email).
+
+Na checagem pública de 25/11/2026, as duas variáveis estavam ausentes no contêiner da API. `GET /auth/recursos` anunciou `emailDisponivel: false`, e uma solicitação válida de cadastro recebeu HTTP 503. No Chrome, tanto a 390 px quanto a 1280 px, a capa, o WhatsApp, Voltar e Avançar, o logo e o formulário profissional responderam. A entrega de confirmação, o reenvio e a recuperação precisam de uma caixa real autorizada para a validação pública.
+
+## Uso contínuo após o AWS Academy
+
+Para uso comercial, planeje a transferência para uma conta de infraestrutura durável, com domínio e DNS sob controle do titular, remetente verificado, renovação de certificados, monitoramento de disponibilidade e backups com restauração testada. Antes da transição, confirme que o titular abre **Pedidos** e **Agenda** com a própria senha e combine com ele e com a equipe da apresentação a data de encerramento do acesso de demonstração.
