@@ -158,6 +158,7 @@ test('provisionamento por stdin e troca obrigatória sem serviço de e-mail', as
   await entrar(temporaria, 401);
   const renovado = await entrar(nova);
   assert.equal(renovado.conta.trocarSenha, undefined);
+  await req('/pedidos', {token:renovado.token});
   await req('/visitas', {token:renovado.token});
   assert.equal(provisionar(), 1);
 });

@@ -96,6 +96,23 @@ Confirme o identificador da conta profissional existente e ensaie o provisioname
 
 Na sessão administrativa privada, com a migração aplicada e as variáveis do titular definidas, forneça a senha inicial pela entrada padrão de `npm run provisionar:titular`. Leia o valor com entrada sem eco ou por um canal privado que faça o pipe diretamente. Mantenha a senha fora de argumentos, variáveis de ambiente, arquivos de configuração e logs. Em produção, confira o login até **Trocar senha** e deixe a alteração para o titular. Coordene a mudança com a apresentação se a demonstração usar o mesmo identificador.
 
+No Bash, a função abaixo usa o `compose_release` definido no procedimento de publicação. Defina `AGENDA_OWNER_NAME` e `AGENDA_OWNER_PHONE` na sessão administrativa. O comando usa a seleção de titular e o e-mail da API em execução.
+
+```bash
+provisionar_titular() (
+  set +x
+  IFS= read -r -s -p 'Senha inicial do titular: ' senha_titular || exit 1
+  printf '\n' >&2
+  printf '%s' "$senha_titular" | compose_release exec -T \
+    -e AGENDA_OWNER_NAME="$AGENDA_OWNER_NAME" \
+    -e AGENDA_OWNER_PHONE="$AGENDA_OWNER_PHONE" \
+    api npm run provisionar:titular
+)
+provisionar_titular
+```
+
+Compare o UUID da conta e os vínculos dos pedidos e visitas antes e depois do comando na cópia isolada. Se a conta já estiver vinculada, verifique primeiro o login pela **Área do profissional**. O provisionamento aceita repetir a mesma configuração enquanto a senha inicial continuar ativa.
+
 ## Validar envio de e-mail
 
 Configure `EMAIL_FROM` com o remetente de um domínio verificado no Resend e `RESEND_API_KEY` com acesso de envio no arquivo privado da publicação. Depois da troca da API, confira `/auth/recursos` e percorra cadastro e recuperação com uma caixa de teste autorizada. Confirme a chegada das mensagens e a abertura de cada link no domínio público. [Variáveis do projeto](../.env.example) · [API de envio do Resend](https://resend.com/docs/api-reference/emails/send-email).

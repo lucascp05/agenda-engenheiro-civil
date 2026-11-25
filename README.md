@@ -48,6 +48,8 @@ docker compose exec api npm run test:profissionais
 
 Na validação local registrada para o fluxo do [PR #8](https://github.com/lucascp05/agenda-engenheiro-civil/pull/8), os três scripts npm passaram com PostgreSQL descartável e e-mail simulado. A execução dos mesmos scripts via Compose depende do motor Docker local. Veja as [suítes de integração](backend/test).
 
+A suíte de atendimento verifica que o cliente consulta o pedido após sair e entrar novamente. A suíte de profissionais verifica a troca inicial de senha e o acesso a Pedidos e Agenda em uma conta fictícia, com o envio de e-mail desativado. A validação da entrega real requer um remetente verificado, a chave de envio e uma caixa de teste autorizada. [Procedimento de operação](docs/operacao-aws.md#validar-envio-de-e-mail).
+
 ## Apresentação de 27/11/2026
 
 Prepare dois perfis de navegador para os clientes fictícios A e B e um terceiro para a conta do titular. Combine com o titular a troca inicial de senha antes da apresentação. Consulte [como entrar nas contas acadêmicas](docs/guia-de-uso.md#contas-de-demonstração) antes de compartilhar a tela. No painel **Rede**, mostre método, status e apenas os trechos necessários de requisição e resposta. Oculte senhas e cabeçalhos de autenticação.
