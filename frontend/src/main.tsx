@@ -108,7 +108,7 @@ function Formulario({ titulo, enviar, children }: {
 
 const avisoEmail = 'Cadastro e recuperação por e-mail estão indisponíveis nesta versão. Entre com uma conta existente.';
 
-function Acesso({ entrar, voltar, profissional, destino, cadastro = false, alternarCadastro, emailDisponivel, conviteProfissionalDisponivel }: {
+function Acesso({ entrar, voltar, profissional, destino, cadastro = false, alternarCadastro, emailDisponivel, cadastroAcademicoDisponivel, conviteProfissionalDisponivel }: {
   entrar: (sessao: Sessao) => Promise<void> | void;
   voltar?: () => void;
   profissional?: boolean;
@@ -116,6 +116,7 @@ function Acesso({ entrar, voltar, profissional, destino, cadastro = false, alter
   cadastro?: boolean;
   alternarCadastro?: (cadastro: boolean) => void;
   emailDisponivel?: boolean;
+  cadastroAcademicoDisponivel?: boolean;
   conviteProfissionalDisponivel?: boolean;
 }) {
   const [legado, setLegado] = useState(false);
@@ -125,7 +126,8 @@ function Acesso({ entrar, voltar, profissional, destino, cadastro = false, alter
   const [cadastroEnviado, setCadastroEnviado] = useState(false);
   const login = !cadastro && !recuperar && !convite;
   const celular = legado && login;
-  const emailBloqueado = (cadastro || recuperar) && emailDisponivel === false;
+  const cadastroAcademico = cadastro && cadastroAcademicoDisponivel;
+  const emailBloqueado = (cadastro || recuperar) && emailDisponivel === false && !cadastroAcademico;
   const titulo = convite ? 'Ativar acesso profissional' : cadastro ? 'Crie sua conta' : recuperar ? 'Redefinir senha' : profissional ? 'Entrar como profissional' : 'Acesso do cliente';
   async function enviar(dados: Record<string, string>) {
     if (login) return entrar(await api<Sessao>('/auth/login', undefined, dados));
@@ -146,6 +148,7 @@ function Acesso({ entrar, voltar, profissional, destino, cadastro = false, alter
       <span aria-hidden="true">←</span> Voltar
     </button>}
     <h1>{titulo}</h1>
+    {cadastroAcademico && <p role="status">Cadastro geral indisponível. O teste acadêmico aceita apenas o e-mail autorizado.</p>}
     {cadastro && !emailBloqueado && <p>Informe seu nome e e-mail. Você vai criar a senha ao abrir o link de confirmação.</p>}
     {!cadastro && !recuperar && destino === 'novo' && <p>{emailDisponivel === false ? 'Entre para continuar com seu pedido.' : 'Entre ou crie uma conta para continuar com seu pedido.'}</p>}
     {emailBloqueado ? <p className="retorno" role="status">{avisoEmail}</p> : <Formulario key={titulo + celular} titulo={cadastro ? cadastroEnviado ? 'Reenviar confirmação' : 'Enviar confirmação' : login ? 'Entrar' : 'Enviar link'} enviar={enviar}>
@@ -346,12 +349,14 @@ const confirmacoes: Record<Acao, string> = {
 function App() {
   const [sessao, setSessao] = useState(lerSessao);
   const [emailDisponivel, setEmailDisponivel] = useState<boolean>();
+  const [cadastroAcademicoDisponivel, setCadastroAcademicoDisponivel] = useState(false);
   const [conviteProfissionalDisponivel, setConviteProfissionalDisponivel] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
-    void api<{ emailDisponivel: boolean; conviteProfissionalDisponivel?: boolean }>('/auth/recursos', undefined, undefined, controller.signal)
+    void api<{ emailDisponivel: boolean; cadastroAcademicoDisponivel?: boolean; conviteProfissionalDisponivel?: boolean }>('/auth/recursos', undefined, undefined, controller.signal)
       .then(recursos => {
         setEmailDisponivel(recursos.emailDisponivel);
+        setCadastroAcademicoDisponivel(recursos.cadastroAcademicoDisponivel === true);
         setConviteProfissionalDisponivel(recursos.conviteProfissionalDisponivel === true);
       }).catch(() => {});
     return () => controller.abort();
@@ -604,7 +609,7 @@ function App() {
           }</Formulario>
         </section>}
       </>}
-      {!sessao && (tela === 'novo' || tela === 'pedidos') && <Acesso key={tela + navegacao.cadastro} entrar={entrar} voltar={() => ir('inicio')} destino={tela} cadastro={navegacao.cadastro} alternarCadastro={cadastro => ir(tela, cadastro)} emailDisponivel={emailDisponivel}/>}
+      {!sessao && (tela === 'novo' || tela === 'pedidos') && <Acesso key={tela + navegacao.cadastro} entrar={entrar} voltar={() => ir('inicio')} destino={tela} cadastro={navegacao.cadastro} alternarCadastro={cadastro => ir(tela, cadastro)} emailDisponivel={emailDisponivel} cadastroAcademicoDisponivel={cadastroAcademicoDisponivel}/>}
       {cliente && tela === 'novo' && <NovoPedido enviar={async dados => {
         await enviar('/pedidos', dados);
         ir('pedidos');
