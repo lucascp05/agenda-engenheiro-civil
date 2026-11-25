@@ -7,6 +7,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Configure POSTGRES_PASSWORD em .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks:
+      - dados
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U agenda -d agenda"]
       interval: 3s
@@ -32,6 +34,9 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    networks:
+      - default
+      - dados
     ports:
       - "127.0.0.1:3000:3000"
     healthcheck:
@@ -50,3 +55,6 @@ services:
     restart: unless-stopped
 volumes:
   pgdata:
+networks:
+  dados:
+    internal: true
