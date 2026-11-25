@@ -16,17 +16,39 @@ const assuntos: Record<FinalidadeEmail, string> = {
 export class Email {
   constructor(private db: Db) {}
 
-  disponivel() {
+  private configurado() {
     return Boolean((process.env.AGENDA_PUBLICACAO !== '1' && process.env.EMAIL_TEST_URL) ||
       (process.env.RESEND_API_KEY?.trim() && process.env.EMAIL_FROM?.trim()));
   }
 
-  exigirDisponibilidade() {
-    if (!this.disponivel()) throw new ServiceUnavailableException('Cadastro e recuperação por e-mail estão indisponíveis nesta versão. Entre com uma conta existente.');
+  private get destinatarioAcademico() {
+    return process.env.EMAIL_ACADEMIC_RECIPIENT?.trim().toLowerCase();
+  }
+
+  private get modoAcademico() {
+    return Boolean(this.destinatarioAcademico) || /(?:@|\b)resend\.dev(?:>|$)/i.test(process.env.EMAIL_FROM?.trim() ?? '');
+  }
+
+  disponivel() {
+    return !this.modoAcademico && this.configurado();
+  }
+
+  cadastroAcademicoDisponivel() {
+    return this.modoAcademico && Boolean(this.destinatarioAcademico) && this.configurado();
+  }
+
+  exigirDisponibilidade(emailCadastro?: string) {
+    if (!this.disponivel() && !(this.cadastroAcademicoDisponivel() && emailCadastro === this.destinatarioAcademico)) {
+      throw new ServiceUnavailableException('Cadastro e recuperação por e-mail estão indisponíveis nesta versão. Entre com uma conta existente.');
+    }
+  }
+
+  exigirConfirmacaoPermitida(email: string) {
+    if (this.modoAcademico && email !== this.destinatarioAcademico) throw invalido();
   }
 
   async enviar(dados: Omit<Prisma.TokenEmailUncheckedCreateInput, 'hash' | 'expiraEm'>) {
-    this.exigirDisponibilidade();
+    this.exigirDisponibilidade(dados.finalidade === 'CADASTRO' ? dados.email : undefined);
     const publico = process.env.AGENDA_PUBLICACAO === '1';
     const teste = publico ? undefined : process.env.EMAIL_TEST_URL;
     const chave = process.env.RESEND_API_KEY?.trim();

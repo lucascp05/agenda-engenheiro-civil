@@ -114,6 +114,7 @@ class Acesso {
     const emailDisponivel = this.email.disponivel();
     return {
       emailDisponivel,
+      ...(this.email.cadastroAcademicoDisponivel() && { cadastroAcademicoDisponivel: true }),
       ...(emailDisponivel && proprietario && emailProprietario ? { conviteProfissionalDisponivel: true } : {}),
     };
   }
@@ -122,7 +123,7 @@ class Acesso {
   @HttpCode(202)
   @UseGuards(LimitePorIp)
   async cadastro(@Body() dados: CadastroDto, @Res({ passthrough: true }) res: RespostaComCabecalho) {
-    this.email.exigirDisponibilidade();
+    this.email.exigirDisponibilidade(dados.email);
     this.limites.consumir('cadastro-email:' + dados.email, 5, res);
     if (dados.email !== emailProprietario && !await this.db.conta.count({ where: { email: dados.email } })) {
       await this.email.enviar({ finalidade: 'CADASTRO', ...dados });
@@ -136,6 +137,7 @@ class Acesso {
     try {
       const conta = await this.db.$transaction(async tx => {
         const registro = await this.email.consumir(tx, dados.token, 'CADASTRO');
+        this.email.exigirConfirmacaoPermitida(registro.email);
         if (registro.email === emailProprietario) throw new ConflictException('Este link já não pode ser usado.');
         return tx.conta.create({
           data: { email: registro.email, nome: registro.nome!, hash: await gerarHash(dados.senha), papel: 'CLIENTE' },

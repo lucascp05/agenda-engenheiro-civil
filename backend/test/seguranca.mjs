@@ -19,6 +19,26 @@ test('cadastro e recuperação informam indisponibilidade sem remetente', async 
   }
 });
 
+test('remetente acadêmico permite confirmação somente para a caixa autorizada', async t => {
+  const autorizado = randomUUID() + '@example.test';
+  const outro = randomUUID() + '@example.test';
+  const remetente = { EMAIL_FROM: 'Agenda <onboarding@resend.dev>' };
+  const semCaixa = requisicoes((await iniciarApi(t, { ...remetente, EMAIL_ACADEMIC_RECIPIENT: '' })).base);
+  assert.deepEqual(await semCaixa('/auth/recursos'), { emailDisponivel: false });
+  await semCaixa('/auth/cadastro', { body: { nome: 'Cliente fictício', email: autorizado }, status: 503 });
+
+  const caixa = await iniciarApi(t, { ...remetente, EMAIL_ACADEMIC_RECIPIENT: autorizado });
+  const req = requisicoes(caixa.base);
+  assert.deepEqual(await req('/auth/recursos'), { emailDisponivel: false, cadastroAcademicoDisponivel: true });
+  await req('/auth/cadastro', { body: { nome: 'Cliente fictício', email: outro }, status: 503 });
+  await req('/auth/recuperacao', { body: { email: autorizado }, status: 503 });
+  await req('/auth/cadastro', { body: { nome: 'Cliente autorizado', email: autorizado.toUpperCase() }, status: 202 });
+  const senha = 'Senha fictícia de cadastro acadêmico';
+  const acesso = await req('/auth/confirmar-email', { body: { token: caixa.token(autorizado, 'CADASTRO'), senha } });
+  assert.equal(acesso.conta.email, autorizado);
+  assert.equal((await req('/auth/login', { body: { email: autorizado, senha } })).conta.id, acesso.conta.id);
+});
+
 test('sessão, senhas, CORS, limites e verificação por e-mail', { timeout: 30000 }, async t => {
   const origem = 'http://localhost:8080';
   const caixa = await iniciarApi(t, { CORS_ORIGINS: origem });
