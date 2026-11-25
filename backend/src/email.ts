@@ -29,8 +29,8 @@ export class Email {
     this.exigirDisponibilidade();
     const publico = process.env.AGENDA_PUBLICACAO === '1';
     const teste = publico ? undefined : process.env.EMAIL_TEST_URL;
-    const chave = process.env.RESEND_API_KEY;
-    const remetente = process.env.EMAIL_FROM;
+    const chave = process.env.RESEND_API_KEY?.trim();
+    const remetente = process.env.EMAIL_FROM?.trim();
     const agora = new Date();
     const token = randomBytes(32).toString('hex');
     const hash = resumir(token);
@@ -48,7 +48,7 @@ export class Email {
         headers: { 'Content-Type': 'application/json', ...(!teste && { Authorization: 'Bearer ' + chave }) },
         body: JSON.stringify({
           from: remetente || 'agenda@example.test', to: [dados.email], subject: assuntos[dados.finalidade],
-          text: assuntos[dados.finalidade] + ' na Agenda do Engenheiro Civil. O link é válido por 20 minutos.\n\n' + link.href,
+          text: assuntos[dados.finalidade] + ' na Agenda da Tatico Assis. O link é válido por 20 minutos.\n\n' + link.href,
         }),
         signal: AbortSignal.timeout(8000),
       });
@@ -56,7 +56,7 @@ export class Email {
       if (!resposta.ok) throw new Error();
     } catch {
       await this.db.tokenEmail.deleteMany({ where: { hash } });
-      throw new ServiceUnavailableException('Envio de e-mail temporariamente indisponível.');
+      throw new ServiceUnavailableException('Não foi possível enviar o e-mail. Você pode tentar novamente com os mesmos dados.');
     }
   }
 
