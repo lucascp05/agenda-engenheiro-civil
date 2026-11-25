@@ -239,8 +239,8 @@ function NovoPedido({ enviar }: { enviar: (dados: object) => Promise<void> }) {
     <Formulario titulo="Enviar pedido" enviar={enviar}>{erro => <>
       <Campo nome="servico" rotulo="Tipo de serviço" erro={erro}><select name="servico" required defaultValue=""><option value="" disabled>Selecione um serviço</option>{servicos.map(s => <option key={s}>{s}</option>)}</select></Campo>
       <Campo nome="municipio" rotulo="Em qual município fica o imóvel?" erro={erro}><input name="municipio" required minLength={2} maxLength={90}/></Campo>
-      <Campo nome="comunidade" rotulo="Comunidade ou localidade (opcional)" erro={erro}><input name="comunidade" minLength={2} maxLength={100}/></Campo>
-      <Campo nome="local" rotulo="Como chegar?" erro={erro}><input name="local" required minLength={3} maxLength={160} placeholder="Estrada, endereço ou ponto de referência"/></Campo>
+      <Campo nome="comunidade" rotulo="Comunidade ou endereço" erro={erro}><input name="comunidade" required minLength={2} maxLength={100}/></Campo>
+      <Campo nome="local" rotulo="Referência de acesso" erro={erro}><input name="local" required minLength={3} maxLength={160} placeholder="Ex.: porteira depois do galpão"/></Campo>
       <Campo nome="descricao" rotulo="O que você precisa?" erro={erro}><textarea name="descricao" required minLength={3} maxLength={400} rows={3}/></Campo>
       <Campo nome="celular" rotulo="Celular com DDD para combinar a visita (opcional)" erro={erro}><input name="celular" type="tel" autoComplete="tel-national" maxLength={20}/></Campo>
       <Campo nome="link" rotulo="Link de localização (opcional)" erro={erro}><input type="url" name="link" maxLength={500} placeholder="https://"/></Campo>
