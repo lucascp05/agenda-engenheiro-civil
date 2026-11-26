@@ -4,6 +4,7 @@ import test from 'node:test';
 import { AdminDeleteUserCommand, AdminInitiateAuthCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider';
 import { PrismaClient } from '@prisma/client';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
+import { CognitoJwtInvalidClientIdError, CognitoJwtInvalidTokenUseError, JwtInvalidSignatureError, ParameterValidationError } from 'aws-jwt-verify/error';
 import { requisicoes } from './ambiente.mjs';
 import senhaLocal from '../dist/senha.js';
 
@@ -52,17 +53,17 @@ test('Cognito real, migração, recuperação, logout e autorização na prévia
 
   const [cabecalho, corpo, assinatura] = sessao.token.split('.');
   const corrompido = [cabecalho, corpo, (assinatura.startsWith('A') ? 'B' : 'A') + assinatura.slice(1)].join('.');
-  await assert.rejects(verificador.verify(corrompido), { name: 'JwtInvalidSignatureError' });
+  await assert.rejects(verificador.verify(corrompido), JwtInvalidSignatureError);
   await req('/pedidos', { token: corrompido, status: 401 });
   const emissorErrado = [cabecalho, Buffer.from(JSON.stringify({ ...claims, iss: 'https://example.test' })).toString('base64url'), assinatura].join('.');
-  await assert.rejects(verificador.verify(emissorErrado), { name: 'JwtInvalidIssuerError' });
+  await assert.rejects(verificador.verify(emissorErrado), ParameterValidationError);
   await req('/pedidos', { token: emissorErrado, status: 401 });
   const params = { USERNAME: vinculo.cognitoUsuario, PASSWORD: createHash('sha256').update(vinculo.cognitoUsuario).update('\0').update(senha).digest('hex') };
   const autenticar = ClientId => aws.send(new AdminInitiateAuthCommand({ UserPoolId: pool, ClientId, AuthFlow: 'ADMIN_USER_PASSWORD_AUTH', AuthParameters: params }));
   const { AuthenticationResult: direto } = await autenticar(cliente);
   const { AuthenticationResult: outro } = await autenticar(alternativo);
-  await assert.rejects(verificador.verify(direto.IdToken), { name: 'CognitoJwtInvalidTokenUseError' });
-  await assert.rejects(verificador.verify(outro.AccessToken), { name: 'CognitoJwtInvalidClientIdError' });
+  await assert.rejects(verificador.verify(direto.IdToken), CognitoJwtInvalidTokenUseError);
+  await assert.rejects(verificador.verify(outro.AccessToken), CognitoJwtInvalidClientIdError);
   await req('/pedidos', { token: direto.IdToken, status: 401 });
   await req('/pedidos', { token: outro.AccessToken, status: 401 });
   await t.diagnostic(`Token AWS verificado. iss=${claims.iss} token_use=${claims.token_use} client_id=${claims.client_id}. Assinatura adulterada, emissor alterado, ID token e access token de outro cliente rejeitados.`);

@@ -47,7 +47,7 @@ export class Cognito {
       return { cognitoUsuario: usuario, cognitoSub: sub };
     } catch (erro) {
       if (criado) await this.remover(usuario);
-      throw this.indisponivel(erro);
+      throw this.indisponivel(criado ? 'AdminSetUserPassword' : 'AdminCreateUser', erro);
     }
   }
 
@@ -55,7 +55,7 @@ export class Cognito {
     try {
       await this.api!.send(new AdminDeleteUserCommand({ UserPoolId: pool, Username: usuario }));
     } catch (erro) {
-      if (!(erro instanceof UserNotFoundException)) this.indisponivel(erro);
+      if (!(erro instanceof UserNotFoundException)) this.indisponivel('AdminDeleteUser', erro);
     }
   }
 
@@ -72,12 +72,12 @@ export class Cognito {
       if (erro instanceof NotAuthorizedException || erro instanceof UserNotFoundException) {
         throw new UnauthorizedException('Dados de acesso incorretos.');
       }
-      throw this.indisponivel(erro);
+      throw this.indisponivel('AdminInitiateAuth', erro);
     }
   }
 
-  private indisponivel(erro: unknown) {
-    console.warn('Falha na operação Cognito:', erro instanceof Error ? erro.name : 'desconhecida');
+  private indisponivel(operacao: string, erro: unknown) {
+    console.warn('Falha na operação Cognito', operacao, erro instanceof Error ? erro.name : 'desconhecida');
     return new ServiceUnavailableException('Autenticação indisponível. Tente novamente.');
   }
 }
