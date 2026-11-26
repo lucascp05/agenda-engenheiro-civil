@@ -73,6 +73,10 @@ docker exec -i agenda-db-1 pg_restore -l < agenda-antes-do-deploy.dump
 
 ## Migração
 
+Para publicar com Cognito, configure `COGNITO_USER_POOL_ID` e `COGNITO_CLIENT_ID` no ambiente privado da API. Use o pool dedicado à Agenda em `us-east-1`, com nomes de usuário internos, criação administrativa, recuperação administrativa e o fluxo `ALLOW_ADMIN_USER_PASSWORD_AUTH`. A instância fornece as credenciais pelo perfil IAM. As operações da API no pool são `AdminCreateUser`, `AdminSetUserPassword`, `AdminInitiateAuth` e `AdminDeleteUser`. Preserve o `JWT_SECRET` do ambiente como segredo estável para derivar a credencial enviada ao Cognito.
+
+O primeiro login valida a senha já cadastrada e registra o `sub` retornado pelo Cognito no mesmo UUID local. A API usa esse vínculo e uma sessão revogável no PostgreSQL. A recuperação pelo código e a troca da senha do titular substituem a identidade vinculada, revogam as sessões anteriores e solicitam a remoção da identidade anterior. O código de recuperação permanece no fluxo da Agenda. As senhas armazenadas como hash no PostgreSQL permanecem disponíveis para retorno a `f194074`.
+
 O [Dockerfile da API](../backend/Dockerfile) executa `prisma migrate deploy` antes de iniciar o NestJS. Restaure o dump em um banco isolado e aplique as migrações com a nova imagem. Consulte `_prisma_migrations` e compare as contagens e os vínculos de contas, pedidos e visitas. As [migrações](../backend/prisma/migrations) incluem a coluna `Conta.trocarSenha`, cujo padrão é `false` para as contas existentes.
 
 A publicação anterior de 24/11/2026 registrou backup e comparação de contagens após migração. A suíte local [profissionais.mjs](../backend/test/profissionais.mjs) confirmou a atualização a partir das três primeiras migrações com dados fictícios. Uma cópia da base foi restaurada na prévia isolada. O PR #8 não acrescentou migração.

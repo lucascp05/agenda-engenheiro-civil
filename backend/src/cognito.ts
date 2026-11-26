@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { Injectable, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import {
   AdminCreateUserCommand, AdminDeleteUserCommand, AdminInitiateAuthCommand, AdminSetUserPasswordCommand,
@@ -26,7 +26,7 @@ export class Cognito {
 
   private senha(usuario: string, senha: string) {
     // Preserva as senhas aceitas pela Agenda, inclusive frases com espaços.
-    return createHash('sha256').update(usuario).update('\0').update(senha).digest('hex');
+    return createHmac('sha256', process.env.JWT_SECRET!).update('agenda:cognito:senha\0').update(usuario).update('\0').update(senha).digest('hex');
   }
 
   async verificar(token: string) {

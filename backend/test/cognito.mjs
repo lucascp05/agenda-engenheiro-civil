@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 import { AdminDeleteUserCommand, AdminInitiateAuthCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider';
@@ -58,18 +58,21 @@ test('Cognito real, migração, recuperação, logout e autorização na prévia
   const [cabecalho, corpo, assinatura] = sessao.token.split('.');
   const corrompido = [cabecalho, corpo, (assinatura.startsWith('A') ? 'B' : 'A') + assinatura.slice(1)].join('.');
   await assert.rejects(verificador.verify(corrompido), JwtInvalidSignatureError);
-  await req('/pedidos', { token: corrompido, status: 401 });
   const emissorErrado = [cabecalho, Buffer.from(JSON.stringify({ ...claims, iss: 'https://example.test' })).toString('base64url'), assinatura].join('.');
   await assert.rejects(new cognitoApi.Cognito().verificar(emissorErrado), JwtInvalidIssuerError);
-  await req('/pedidos', { token: emissorErrado, status: 401 });
-  const params = { USERNAME: vinculo.cognitoUsuario, PASSWORD: createHash('sha256').update(vinculo.cognitoUsuario).update('\0').update(senha).digest('hex') };
+  const senhaCognito = createHmac('sha256', process.env.JWT_SECRET).update('agenda:cognito:senha\0').update(vinculo.cognitoUsuario).update('\0').update(senha).digest('hex');
+  const params = { USERNAME: vinculo.cognitoUsuario, PASSWORD: senhaCognito };
   const autenticar = ClientId => aws.send(new AdminInitiateAuthCommand({ UserPoolId: pool, ClientId, AuthFlow: 'ADMIN_USER_PASSWORD_AUTH', AuthParameters: params }));
   const { AuthenticationResult: direto } = await autenticar(cliente);
   const { AuthenticationResult: outro } = await autenticar(alternativo);
   await assert.rejects(verificador.verify(direto.IdToken), CognitoJwtInvalidTokenUseError);
   await assert.rejects(verificador.verify(outro.AccessToken), CognitoJwtInvalidClientIdError);
-  await req('/pedidos', { token: direto.IdToken, status: 401 });
-  await req('/pedidos', { token: outro.AccessToken, status: 401 });
+  for (const token of [corrompido, emissorErrado, direto.IdToken, outro.AccessToken]) {
+    const id = createHash('sha256').update(token).digest('hex');
+    await db.sessaoAcesso.create({ data: { id, contaId: legado.id, expiraEm: new Date(claims.exp * 1000) } });
+    await req('/pedidos', { token, status: 401 });
+    await db.sessaoAcesso.delete({ where: { id } });
+  }
   await t.diagnostic(`Token AWS verificado. iss=${claims.iss} token_use=${claims.token_use} client_id=${claims.client_id}. Assinatura adulterada, emissor alterado, ID token e access token de outro cliente rejeitados.`);
 
   for (const identificador of [{ email: 'novo@example.test' }, { celular: '84991110001' }]) {
