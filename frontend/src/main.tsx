@@ -2,7 +2,7 @@ import { cloneElement, useEffect, useId, useState, type FormEvent, type ReactEle
 import { createRoot } from 'react-dom/client';
 import './style.css';
 
-type Conta = { nome: string; celular: string | null; email?: string | null; profissional?: boolean; trocarSenha?: boolean; papel: 'CLIENTE' | 'ENGENHEIRO' | 'ADMIN' };
+type Conta = { nome: string; celular: string | null; email?: string | null; emailVerificado?: boolean; profissional?: boolean; trocarSenha?: boolean; papel: 'CLIENTE' | 'ENGENHEIRO' | 'ADMIN' };
 type Sessao = { conta: Conta; token: string; expiraEm: string };
 type Situacao = 'RECEBIDO' | 'INFORMACOES' | 'MARCADO' | 'CONCLUIDO';
 type Lugar = { municipio: string; comunidade?: string; local: string };
@@ -106,9 +106,9 @@ function Formulario({ titulo, enviar, children }: {
   </form>;
 }
 
-const avisoEmail = 'Cadastro e recuperação por e-mail estão indisponíveis nesta versão. Entre com uma conta existente.';
+const avisoEmail = 'A recuperação por e-mail está indisponível.';
 
-function Acesso({ entrar, voltar, profissional, destino, cadastro = false, alternarCadastro, emailDisponivel, cadastroAcademicoDisponivel, conviteProfissionalDisponivel }: {
+function Acesso({ entrar, voltar, profissional, destino, cadastro = false, alternarCadastro, emailDisponivel, conviteProfissionalDisponivel }: {
   entrar: (sessao: Sessao) => Promise<void> | void;
   voltar?: () => void;
   profissional?: boolean;
@@ -116,48 +116,83 @@ function Acesso({ entrar, voltar, profissional, destino, cadastro = false, alter
   cadastro?: boolean;
   alternarCadastro?: (cadastro: boolean) => void;
   emailDisponivel?: boolean;
-  cadastroAcademicoDisponivel?: boolean;
   conviteProfissionalDisponivel?: boolean;
 }) {
   const [legado, setLegado] = useState(false);
   const [recuperar, setRecuperar] = useState(false);
   const [convite, setConvite] = useState(false);
   const [retorno, setRetorno] = useState('');
-  const [cadastroEnviado, setCadastroEnviado] = useState(false);
+  const [porEmail, setPorEmail] = useState(false);
+  const [recuperacao, setRecuperacao] = useState<{ codigo: string; sessao?: Sessao }>();
+  const [copiado, setCopiado] = useState(false);
   const login = !cadastro && !recuperar && !convite;
-  const celular = legado && login;
-  const cadastroAcademico = cadastro && cadastroAcademicoDisponivel;
-  const emailBloqueado = (cadastro || recuperar) && emailDisponivel === false && !cadastroAcademico;
+  const usarCodigo = recuperar && !profissional && !porEmail;
+  const celular = legado && (login || cadastro || usarCodigo);
+  const emailBloqueado = recuperar && !usarCodigo && emailDisponivel === false;
   const titulo = convite ? 'Ativar acesso profissional' : cadastro ? 'Crie sua conta' : recuperar ? 'Redefinir senha' : profissional ? 'Entrar como profissional' : 'Acesso do cliente';
   async function enviar(dados: Record<string, string>) {
     if (login) return entrar(await api<Sessao>('/auth/login', undefined, dados));
-    const rota = convite ? '/auth/convite-profissional' : cadastro ? '/auth/cadastro' : '/auth/recuperacao';
+    if (cadastro) {
+      const { codigo, ...sessao } = await api<Sessao & { codigo: string }>('/auth/contas', undefined, dados);
+      setRecuperacao({ codigo, sessao });
+      return;
+    }
+    if (usarCodigo) {
+      setRecuperacao(await api<{ codigo: string }>('/auth/recuperacao-codigo', undefined, dados));
+      return;
+    }
+    const rota = convite ? '/auth/convite-profissional' : '/auth/recuperacao';
     const { mensagem } = await api<{ mensagem: string }>(rota, undefined, dados);
     setRetorno(mensagem);
-    if (cadastro) setCadastroEnviado(true);
   }
   function alternar(novoCadastro: boolean) {
     setRecuperar(false);
     setLegado(false);
     setRetorno('');
-    setCadastroEnviado(false);
     alternarCadastro?.(novoCadastro);
   }
+  if (recuperacao) return <section className="painel estreito acesso painel-formulario">
+    <h1>Guarde seu código de recuperação</h1>
+    <p>Use este código privado para recuperar sua conta se esquecer a senha.</p>
+    <label htmlFor="codigo-privado">Código de recuperação</label>
+    <input id="codigo-privado" value={recuperacao.codigo} readOnly onFocus={evento => evento.currentTarget.select()}/>
+    <div className="acoes">
+      <button className="secundario" onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(recuperacao.codigo);
+          setCopiado(true);
+        } catch {
+          document.getElementById('codigo-privado')?.focus();
+        }
+      }}>Copiar código</button>
+      <button className="primario" onClick={() => {
+        if (recuperacao.sessao) void entrar(recuperacao.sessao);
+        else {
+          setRecuperacao(undefined);
+          setCopiado(false);
+          setRecuperar(false);
+          setRetorno('Senha alterada. Entre com a nova senha.');
+        }
+      }}>Já guardei, continuar</button>
+    </div>
+    {copiado && <p role="status">Código copiado.</p>}
+  </section>;
   return <section className="painel estreito acesso painel-formulario">
     {voltar && <button type="button" className="texto voltar-acesso" onClick={voltar}>
       <span aria-hidden="true">←</span> Voltar
     </button>}
     <h1>{titulo}</h1>
-    {cadastroAcademico && <p role="status">Cadastro geral indisponível. O teste acadêmico aceita apenas o e-mail autorizado.</p>}
-    {cadastro && !emailBloqueado && <p>Informe seu nome e e-mail. Você vai criar a senha ao abrir o link de confirmação.</p>}
-    {!cadastro && !recuperar && destino === 'novo' && <p>{emailDisponivel === false ? 'Entre para continuar com seu pedido.' : 'Entre ou crie uma conta para continuar com seu pedido.'}</p>}
-    {emailBloqueado ? <p className="retorno" role="status">{avisoEmail}</p> : <Formulario key={titulo + celular} titulo={cadastro ? cadastroEnviado ? 'Reenviar confirmação' : 'Enviar confirmação' : login ? 'Entrar' : 'Enviar link'} enviar={enviar}>
+    {!cadastro && !recuperar && destino === 'novo' && <p>Entre ou crie uma conta para continuar com seu pedido.</p>}
+    {(cadastro || usarCodigo) && <button type="button" className="texto alternar-acesso" onClick={() => setLegado(!legado)}>{celular ? 'Usar e-mail' : 'Usar celular'}</button>}
+    {recuperar && !profissional && emailDisponivel && <button type="button" className="texto alternar-acesso" onClick={() => { setPorEmail(!porEmail); setRetorno(''); }}>{porEmail ? 'Usar código privado' : 'Usar link de e-mail verificado'}</button>}
+    {emailBloqueado ? <p className="retorno" role="status">{avisoEmail}</p> : <Formulario key={titulo + celular + usarCodigo} titulo={cadastro ? 'Criar conta' : usarCodigo ? 'Salvar nova senha' : login ? 'Entrar' : 'Enviar link'} enviar={enviar}>
       {erro => <>
         {cadastro && <Campo nome="nome" rotulo="Nome" erro={erro}><input name="nome" autoComplete="name" required minLength={2} maxLength={80}/></Campo>}
         {celular
           ? <Campo nome="celular" rotulo="Celular com DDD" erro={erro}><input name="celular" type="tel" autoComplete="username" required maxLength={20}/></Campo>
           : <Campo nome="email" rotulo="E-mail" erro={erro}><input name="email" type="email" autoComplete={login ? 'username' : 'email'} required maxLength={254}/></Campo>}
-        {login && <Campo nome="senha" rotulo="Senha" erro={erro}><input name="senha" type="password" autoComplete="current-password" required minLength={8} maxLength={128}/></Campo>}
+        {usarCodigo && <Campo nome="codigo" rotulo="Código privado de recuperação" erro={erro}><input name="codigo" autoComplete="off" required maxLength={32}/></Campo>}
+        {(cadastro || login || usarCodigo) && <Campo nome="senha" rotulo={login ? 'Senha' : 'Senha (15 a 128 caracteres)'} erro={erro}><input name="senha" type="password" autoComplete={login ? 'current-password' : 'new-password'} required minLength={login ? 8 : 15} maxLength={128}/></Campo>}
       </>}
     </Formulario>}
     {retorno && <p className="retorno" role="status">{retorno}</p>}
@@ -349,14 +384,12 @@ const confirmacoes: Record<Acao, string> = {
 function App() {
   const [sessao, setSessao] = useState(lerSessao);
   const [emailDisponivel, setEmailDisponivel] = useState<boolean>();
-  const [cadastroAcademicoDisponivel, setCadastroAcademicoDisponivel] = useState(false);
   const [conviteProfissionalDisponivel, setConviteProfissionalDisponivel] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
-    void api<{ emailDisponivel: boolean; cadastroAcademicoDisponivel?: boolean; conviteProfissionalDisponivel?: boolean }>('/auth/recursos', undefined, undefined, controller.signal)
+    void api<{ emailDisponivel: boolean; conviteProfissionalDisponivel?: boolean }>('/auth/recursos', undefined, undefined, controller.signal)
       .then(recursos => {
         setEmailDisponivel(recursos.emailDisponivel);
-        setCadastroAcademicoDisponivel(recursos.cadastroAcademicoDisponivel === true);
         setConviteProfissionalDisponivel(recursos.conviteProfissionalDisponivel === true);
       }).catch(() => {});
     return () => controller.abort();
@@ -581,7 +614,7 @@ function App() {
       </section>}
       {tela === 'conta' && sessao && !trocaObrigatoria && <section className="painel estreito painel-formulario">
         <h1>Minha conta</h1>
-        {sessao.conta.email ? <p>E-mail verificado: {sessao.conta.email}</p> :
+        {sessao.conta.email ? <p>{sessao.conta.emailVerificado ? 'E-mail verificado' : 'E-mail de acesso'}: {sessao.conta.email}</p> :
           emailDisponivel === false ? <p>Vínculo por e-mail indisponível nesta versão.</p> :
           <Formulario titulo="Enviar confirmação" enviar={async dados => {
             const { mensagem } = await enviar<{ mensagem: string }>('/auth/vincular-email', dados);
@@ -609,7 +642,7 @@ function App() {
           }</Formulario>
         </section>}
       </>}
-      {!sessao && (tela === 'novo' || tela === 'pedidos') && <Acesso key={tela + navegacao.cadastro} entrar={entrar} voltar={() => ir('inicio')} destino={tela} cadastro={navegacao.cadastro} alternarCadastro={cadastro => ir(tela, cadastro)} emailDisponivel={emailDisponivel} cadastroAcademicoDisponivel={cadastroAcademicoDisponivel}/>}
+      {!sessao && (tela === 'novo' || tela === 'pedidos') && <Acesso key={tela + navegacao.cadastro} entrar={entrar} voltar={() => ir('inicio')} destino={tela} cadastro={navegacao.cadastro} alternarCadastro={cadastro => ir(tela, cadastro)} emailDisponivel={emailDisponivel}/>}
       {cliente && tela === 'novo' && <NovoPedido enviar={async dados => {
         await enviar('/pedidos', dados);
         ir('pedidos');

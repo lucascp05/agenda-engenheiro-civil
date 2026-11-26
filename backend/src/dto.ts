@@ -35,6 +35,22 @@ export class LoginDto {
   senha!: string;
 }
 
+export class CadastroDiretoDto extends LoginDto {
+  @Transform(trim) @IsString() @Length(2, 80)
+  nome!: string;
+
+  @Length(15, 128, { message: 'Escolha uma senha de 15 a 128 caracteres.' })
+  declare senha: string;
+}
+
+export class RecuperacaoCodigoDto extends LoginDto {
+  @Length(15, 128, { message: 'Escolha uma senha de 15 a 128 caracteres.' })
+  declare senha: string;
+
+  @Transform(trim) @Matches(/^[A-Za-z0-9_-]{32}$/)
+  codigo!: string;
+}
+
 export class TrocaSenhaDto {
   @IsString() @Length(8, 128)
   senhaAtual!: string;

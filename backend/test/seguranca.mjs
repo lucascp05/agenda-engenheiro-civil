@@ -6,6 +6,47 @@ import { iniciarApi, requisicoes } from './ambiente.mjs';
 
 const resumir = token => createHash('sha256').update(token).digest('hex');
 
+test('cadastro direto e recuperação por código funcionam sem e-mail de envio', async t => {
+  const { base } = await iniciarApi(t, { EMAIL_TEST_URL: '', RESEND_API_KEY: '', EMAIL_FROM: '' });
+  const req = requisicoes(base);
+  const db = new PrismaClient();
+  t.after(() => db.$disconnect());
+  const email = randomUUID() + '@example.test';
+  const celular = '849' + randomInt(10000000, 99999999);
+  const senha = 'Senha fictícia de acesso direto';
+  const novaSenha = 'Outra senha fictícia de acesso';
+  const dados = { nome: 'Cliente fictício', senha };
+  await req('/auth/contas', { body: { ...dados, email, celular }, status: 400 });
+  await req('/auth/contas', { body: { ...dados, email, papel: 'ENGENHEIRO' }, status: 400 });
+  await req('/auth/contas', { body: { ...dados, email, senha: 'curta123' }, status: 400 });
+  const primeiro = await req('/auth/contas', { body: { ...dados, email: email.toUpperCase() } });
+  const segundo = await req('/auth/contas', { body: { ...dados, celular: '(84) ' + celular.slice(2, 7) + '-' + celular.slice(7) } });
+  assert.equal(primeiro.conta.email, email);
+  assert.equal(primeiro.conta.emailVerificado, false);
+  assert.equal(segundo.conta.celular, celular);
+  assert.equal(primeiro.conta.papel, 'CLIENTE');
+  assert.equal((await db.conta.findUniqueOrThrow({ where: { email } })).recuperacaoHash, resumir(primeiro.codigo));
+  const comEnvio = requisicoes((await iniciarApi(t)).base);
+  await comEnvio('/auth/recuperacao', { body: { email }, status: 202 });
+  assert.equal(await db.tokenEmail.count({ where: { email, finalidade: 'RECUPERACAO' } }), 0);
+  await req('/auth/contas', { body: { ...dados, email, senha: novaSenha }, status: 409 });
+  const pedido = await req('/pedidos', { token: primeiro.token, body: { servico: 'Topografia', municipio: 'Mossoró', local: 'Local fictício', descricao: 'Pedido de teste' } });
+  await req('/pedidos/' + pedido.id, { token: segundo.token, status: 404 });
+  await req('/visitas', { token: primeiro.token, status: 403 });
+  await req('/auth/recuperacao-codigo', { body: { email, codigo: segundo.codigo, senha: novaSenha }, status: 401 });
+  const recuperado = await req('/auth/recuperacao-codigo', { body: { email, codigo: primeiro.codigo, senha: novaSenha }, status: 200 });
+  assert.notEqual(recuperado.codigo, primeiro.codigo);
+  await req('/auth/recuperacao-codigo', { body: { email, codigo: primeiro.codigo, senha }, status: 401 });
+  await req('/pedidos', { token: primeiro.token, status: 401 });
+  await req('/auth/login', { body: { email, senha }, status: 401 });
+  const login = await req('/auth/login', { body: { email, senha: novaSenha } });
+  assert.equal((await req('/pedidos/' + pedido.id, { token: login.token })).id, pedido.id);
+  await req('/auth/sair', { token: login.token, body: {}, status: 204 });
+  await req('/pedidos', { token: login.token, status: 401 });
+  const retorno = await req('/auth/login', { body: { email, senha: novaSenha } });
+  assert.equal((await req('/pedidos', { token: retorno.token }))[0].id, pedido.id);
+});
+
 test('cadastro e recuperação informam indisponibilidade sem remetente', async t => {
   const { base } = await iniciarApi(t, { EMAIL_TEST_URL: '', RESEND_API_KEY: '', EMAIL_FROM: '' });
   const req = requisicoes(base);
@@ -74,7 +115,8 @@ test('sessão, senhas, CORS, limites e verificação por e-mail', { timeout: 300
   await req('/auth/confirmar-email', {body:{token, senha:'a'.repeat(129)}, status:400});
   const primeira = await req('/auth/confirmar-email', {body:{token, senha}});
   assert.equal(primeira.conta.papel,'CLIENTE');
-  assert.deepEqual(Object.keys(primeira.conta).sort(),['celular','email','id','nome','papel','profissional']);
+  assert.deepEqual(Object.keys(primeira.conta).sort(),['celular','email','emailVerificado','id','nome','papel','profissional']);
+  assert.equal(primeira.conta.emailVerificado, true);
   const conta = await db.conta.findUniqueOrThrow({where:{email}});
   assert.ok(conta.hash.startsWith('scrypt-v2:') && !conta.hash.includes(senha));
   await req('/auth/confirmar-email', {body:{token, senha}, status:400});
