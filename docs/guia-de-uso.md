@@ -4,7 +4,7 @@ Abra o [site da Agenda](https://lucas.grupo-04.sd.ufersa.dev.br/). Se abrir uma 
 
 ## Cliente
 
-1. Para um primeiro acesso, clique em **Criar conta**, informe nome e e-mail e abra o link de confirmação para definir a senha. Se o e-mail não chegar, use **Reenviar confirmação**. Depois da confirmação, entre com o e-mail e a senha que você criou. Se precisar redefinir a senha, use **Esqueci minha senha** na tela de entrada. Para uma conta legada ou de demonstração, selecione **Já tenho conta por celular**.
+1. Clique em **Criar conta** e informe nome, senha e e-mail ou celular com DDD. Copie e guarde o código privado, depois continue para usar a conta imediatamente. Se esquecer a senha, escolha **Esqueci minha senha**, informe o identificador e use o código. Guarde o novo código após a recuperação. Contas com e-mail verificado também podem usar um link de recuperação quando o envio estiver ativo.
 2. Clique em **Pedir atendimento** e preencha o formulário. Informe município, comunidade ou endereço, referência de acesso e descrição. Para praticar, use **Topografia**, município **Mossoró**, comunidade **Sítio fictício**, referência **Porteira depois do galpão** e descrição **Levantamento de terreno**. Celular para contato e link do mapa são opcionais.
 3. Clique em **Enviar pedido**. A aplicação abre **Meus pedidos**, onde o novo cartão aparece como **Pedido recebido**.
 4. Volte por **Meus pedidos** no topo ou por **Acompanhar meu pedido** na capa. Se o profissional pedir informações, abra o cartão, clique em **Responder** e envie a resposta.
@@ -18,7 +18,7 @@ Abra o [site da Agenda](https://lucas.grupo-04.sd.ufersa.dev.br/). Se abrir uma 
 4. Abra **Agenda** pelo topo para consultar as visitas de pedidos marcados. O cliente vê a confirmação em **Meus pedidos**. Para encerrar o atendimento, volte ao pedido e use **Concluir atendimento**.
 5. Use **Sair** ao terminar, principalmente em um computador compartilhado.
 
-O primeiro login com senha inicial funciona independentemente do envio de e-mail. O cadastro e a recuperação por e-mail dependem da configuração de envio do ambiente.
+O primeiro login com senha inicial, o cadastro direto de cliente e a recuperação por código funcionam independentemente do envio de e-mail.
 
 ## Contas de demonstração
 
