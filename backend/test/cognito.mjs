@@ -4,8 +4,9 @@ import test from 'node:test';
 import { AdminDeleteUserCommand, AdminInitiateAuthCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider';
 import { PrismaClient } from '@prisma/client';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
-import { CognitoJwtInvalidClientIdError, CognitoJwtInvalidTokenUseError, JwtInvalidSignatureError, ParameterValidationError } from 'aws-jwt-verify/error';
+import { CognitoJwtInvalidClientIdError, CognitoJwtInvalidTokenUseError, JwtInvalidIssuerError, JwtInvalidSignatureError } from 'aws-jwt-verify/error';
 import { requisicoes } from './ambiente.mjs';
+import cognitoApi from '../dist/cognito.js';
 import senhaLocal from '../dist/senha.js';
 
 const { COGNITO_USER_POOL_ID: pool, COGNITO_CLIENT_ID: cliente, COGNITO_CLIENTE_ALTERNATIVO: alternativo, COGNITO_PREVIA_URL: url, AGENDA_OWNER_ID: titularId } = process.env;
@@ -56,7 +57,7 @@ test('Cognito real, migração, recuperação, logout e autorização na prévia
   await assert.rejects(verificador.verify(corrompido), JwtInvalidSignatureError);
   await req('/pedidos', { token: corrompido, status: 401 });
   const emissorErrado = [cabecalho, Buffer.from(JSON.stringify({ ...claims, iss: 'https://example.test' })).toString('base64url'), assinatura].join('.');
-  await assert.rejects(verificador.verify(emissorErrado), ParameterValidationError);
+  await assert.rejects(new cognitoApi.Cognito().verificar(emissorErrado), JwtInvalidIssuerError);
   await req('/pedidos', { token: emissorErrado, status: 401 });
   const params = { USERNAME: vinculo.cognitoUsuario, PASSWORD: createHash('sha256').update(vinculo.cognitoUsuario).update('\0').update(senha).digest('hex') };
   const autenticar = ClientId => aws.send(new AdminInitiateAuthCommand({ UserPoolId: pool, ClientId, AuthFlow: 'ADMIN_USER_PASSWORD_AUTH', AuthParameters: params }));

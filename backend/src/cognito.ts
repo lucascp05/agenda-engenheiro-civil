@@ -5,9 +5,13 @@ import {
   CognitoIdentityProviderClient, NotAuthorizedException, UserNotFoundException,
 } from '@aws-sdk/client-cognito-identity-provider';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
+import { JwtInvalidIssuerError } from 'aws-jwt-verify/error';
+import { decomposeUnverifiedJwt } from 'aws-jwt-verify/jwt';
 
 const pool = process.env.COGNITO_USER_POOL_ID?.trim();
 const clientId = process.env.COGNITO_CLIENT_ID?.trim();
+const regiao = pool?.split('_')[0];
+const emissor = `https://cognito-idp.${regiao}.amazonaws.com/${pool}`;
 if (Boolean(pool) !== Boolean(clientId) || (process.env.AGENDA_PUBLICACAO === '1' && !pool)) {
   throw new Error('Configure COGNITO_USER_POOL_ID e COGNITO_CLIENT_ID.');
 }
@@ -17,7 +21,7 @@ export type IdentidadeCognito = { cognitoUsuario: string; cognitoSub: string };
 @Injectable()
 export class Cognito {
   readonly ativo = Boolean(pool);
-  private readonly api = pool ? new CognitoIdentityProviderClient({ region: pool.split('_')[0], requestHandler: { requestTimeout: 4000 }, maxAttempts: 2 }) : undefined;
+  private readonly api = pool ? new CognitoIdentityProviderClient({ region: regiao, requestHandler: { requestTimeout: 4000 }, maxAttempts: 2 }) : undefined;
   private readonly verifier = pool && clientId ? CognitoJwtVerifier.create({ userPoolId: pool, clientId, tokenUse: 'access' }) : undefined;
 
   private senha(usuario: string, senha: string) {
@@ -26,6 +30,8 @@ export class Cognito {
   }
 
   async verificar(token: string) {
+    const { payload } = decomposeUnverifiedJwt(token);
+    if (payload.iss !== emissor) throw new JwtInvalidIssuerError('Emissor inválido.', payload.iss, emissor);
     const claims = await this.verifier!.verify(token);
     if (!claims.sub || !claims.username || !Number.isSafeInteger(claims.exp)) throw new Error('Token incompleto.');
     return claims;
