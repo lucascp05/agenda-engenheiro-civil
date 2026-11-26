@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
 import test from 'node:test';
 import { AdminDeleteUserCommand, AdminInitiateAuthCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider';
 import { PrismaClient } from '@prisma/client';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
-import { CognitoJwtInvalidClientIdError, CognitoJwtInvalidTokenUseError, JwtInvalidIssuerError, JwtInvalidSignatureError } from 'aws-jwt-verify/error';
+import { CognitoJwtInvalidClientIdError, CognitoJwtInvalidTokenUseError, JwtInvalidSignatureError } from 'aws-jwt-verify/error';
 import { requisicoes } from './ambiente.mjs';
 import cognitoApi from '../dist/cognito.js';
 import senhaLocal from '../dist/senha.js';
+
+const { JwtInvalidIssuerError } = createRequire(import.meta.url)('aws-jwt-verify/error');
 
 const { COGNITO_USER_POOL_ID: pool, COGNITO_CLIENT_ID: cliente, COGNITO_CLIENTE_ALTERNATIVO: alternativo, COGNITO_PREVIA_URL: url, AGENDA_OWNER_ID: titularId } = process.env;
 assert.ok(pool && cliente && alternativo && cliente !== alternativo && url && titularId);
