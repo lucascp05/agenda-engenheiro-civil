@@ -34,7 +34,7 @@ async function provisionar() {
   await db.$transaction(async tx => {
     const alteradas = await tx.conta.updateMany({
       where: { id, papel: 'ENGENHEIRO', email: null, versaoSessao: conta.versaoSessao },
-      data: { nome, email, celular, hash, trocarSenha: true, versaoSessao: { increment: 1 } },
+      data: { nome, email, celular, hash, cognitoUsuario: null, cognitoSub: null, trocarSenha: true, versaoSessao: { increment: 1 } },
     });
     if (!alteradas.count) throw new Error();
     await tx.sessaoAcesso.deleteMany({ where: { contaId: id } });
