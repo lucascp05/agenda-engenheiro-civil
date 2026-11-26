@@ -31,6 +31,8 @@ model Conta {
   nome    String
   celular String?  @unique
   email   String?  @unique
+  emailVerificado Boolean @default(false)
+  recuperacaoHash String? @unique
   hash    String
   papel   Papel    @default(CLIENTE)
   pedidos Pedido[]

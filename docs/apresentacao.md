@@ -13,7 +13,7 @@ Use uma base de exemplo para criar pedidos, mensagens e visitas em sala. No [sit
 
 ## Do pedido à visita
 
-Exemplo fictício em uma base descartável. Ana entra, escolhe **Pedir atendimento**, seleciona **Topografia** e preenche município, endereço fictício, referência de acesso e descrição.
+Exemplo fictício em uma base descartável. Ana escolhe **Pedir atendimento**, cria uma conta com e-mail e senha, guarda o código privado e continua no formulário. Seleciona **Topografia** e preenche município, endereço fictício, referência de acesso e descrição.
 
 | Tela e ação | Chamada e permissão | Regra, gravação e resposta |
 | --- | --- | --- |
@@ -63,4 +63,4 @@ ORDER BY p."criadoEm" DESC;
 
 ## Uso comercial
 
-O envio acadêmico usa `onboarding@resend.dev` e permite confirmação apenas na caixa autorizada. Para liberar novos destinatários, verifique um domínio de envio no Resend, configure o remetente desse domínio e retire a restrição acadêmica, mantendo a confirmação por e-mail. Também é necessário planejar hospedagem durável fora do AWS Academy, backups e monitoramento. Consulte [o guia de operação](operacao-aws.md).
+O envio acadêmico usa `onboarding@resend.dev` e restringe os links por e-mail à caixa autorizada. O cadastro direto de cliente funciona independentemente desse envio. Para oferecer os links de e-mail a outros destinatários, configure no Resend um remetente de domínio verificado e retire a restrição acadêmica. Para operação contínua, planeje hospedagem fora do AWS Academy, backups e monitoramento. Consulte [o guia de operação](operacao-aws.md).

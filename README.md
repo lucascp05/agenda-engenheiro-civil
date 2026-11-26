@@ -15,7 +15,7 @@ Projeto individual de Sistemas Distribuídos da UFERSA, de **Lucas Assis da Cost
 - [Operação na AWS](docs/operacao-aws.md) para publicar, verificar revisões e diagnosticar falhas.
 - [Roteiro da apresentação](docs/apresentacao.md) com o caminho do pedido à visita, os requisitos e perguntas para revisão.
 
-O cadastro público, o reenvio de confirmação e a recuperação de senha precisam de um remetente verificado no Resend. Consulte [o estado da API pública](https://api.lucas.grupo-04.sd.ufersa.dev.br/auth/recursos). Quando `emailDisponivel` é `false`, contas existentes ainda podem entrar com suas credenciais, inclusive pela **Área do profissional**.
+O cadastro público aceita nome, senha e e-mail ou celular com DDD. A conta pode ser usada imediatamente e o cliente recebe um código privado para recuperar o acesso. O Resend é necessário apenas para os fluxos opcionais que enviam links por e-mail.
 
 ## Executar localmente
 
@@ -37,7 +37,7 @@ Use Docker com Compose v2 e o motor do Docker em execução. Os comandos a segui
    curl -fsS http://localhost:3000/saude
    ```
 
-5. Abra o [site local](http://localhost:8080). Entre pela **Área do profissional** com o celular e a senha configurados. Para testar o cadastro pela interface, configure um receptor HTTP de teste alcançável pela API em `EMAIL_TEST_URL`. Ele deve aceitar POST com `from`, `to`, `subject` e `text` e responder com HTTP 2xx. Use endereços fictícios.
+5. Abra o [site local](http://localhost:8080). Entre na **Área do profissional** com as credenciais de teste ou use **Criar conta** com um e-mail ou celular fictício. Para testar somente os fluxos opcionais de envio de links, configure um receptor HTTP de teste em `EMAIL_TEST_URL`.
 
 ### Executar as suítes
 

@@ -20,6 +20,8 @@ O token dos links de e-mail é enviado no JSON das operações de confirmação.
 | `GET /saude` | Público | **200** com `{"ok":true}` após testar a conexão com o PostgreSQL. |
 | `GET /auth/recursos` | Público | **200** com `emailDisponivel`. Quando há envio e titular configurados, inclui `conviteProfissionalDisponivel: true`. |
 | `POST /auth/cadastro` | Público | **202** com mensagem genérica. Recebe `nome` e `email`. **503** sem envio configurado. |
+| `POST /auth/contas` | Público | **201** com sessão de cliente e `codigo` privado. Recebe `nome`, `senha` e exatamente um entre `email` e `celular`. **409** para identificador em uso ou reservado. |
+| `POST /auth/recuperacao-codigo` | Cliente com código privado | **200** com novo `codigo`. Recebe `codigo`, a nova `senha` e o identificador. Revoga sessões anteriores e invalida o código usado. **401** para identificador ou código inválido. |
 | `POST /auth/confirmar-email` | Público com token de cadastro | **201** com a sessão de cliente. **400** para token inválido, expirado ou usado. **409** se houver conflito com conta ou endereço reservado. |
 | `POST /auth/login` | Público | **201** com sessão. **400** para identificadores ausentes ou incompatíveis. **401** para credenciais incorretas. **429** ao exceder tentativas. |
 | `POST /auth/sair` | Conta com sessão válida | **204** após revogar a sessão. **401** para sessão ausente ou inválida. |

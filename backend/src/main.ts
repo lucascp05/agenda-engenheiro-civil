@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import 'reflect-metadata';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   BadRequestException, Body, CanActivate, ConflictException, Controller, createParamDecorator,
   ExecutionContext, ForbiddenException, Get, HttpCode, HttpException, Injectable, Module, NotFoundException, Param,
@@ -11,7 +12,7 @@ import { Papel, Prisma, Situacao } from '@prisma/client';
 import helmet from 'helmet';
 import { Db } from './db';
 import { Email } from './email';
-import { CadastroDto, EmailDto, FiltrosDto, LoginDto, MensagemDto, PedidoDto, PerfilProfissionalDto, SenhaEmailDto, TokenEmailDto, TrocaSenhaDto, RemarcacaoDto, VisitaDto } from './dto';
+import { CadastroDiretoDto, CadastroDto, EmailDto, FiltrosDto, LoginDto, MensagemDto, PedidoDto, PerfilProfissionalDto, RecuperacaoCodigoDto, SenhaEmailDto, TokenEmailDto, TrocaSenhaDto, RemarcacaoDto, VisitaDto } from './dto';
 import { gerarHash, hashLegado, hashReserva, verificarSenha } from './senha';
 import { LimiteAcesso, type RespostaComCabecalho } from './limite-acesso';
 
@@ -21,6 +22,14 @@ type TokenSessao = { sub: string; jti: string; ver: number };
 const Usuario = createParamDecorator((_, contexto: ExecutionContext) =>
   contexto.switchToHttp().getRequest().usuario as Sessao);
 const contaPublica = { id: true, nome: true, celular: true, email: true, papel: true };
+const contaAutenticada = { ...contaPublica, emailVerificado: true } satisfies Prisma.ContaSelect;
+const novoCodigo = () => randomBytes(24).toString('base64url');
+const resumirCodigo = (codigo: string) => createHash('sha256').update(codigo).digest('hex');
+
+function identificadorConta(dados: Pick<LoginDto, 'email' | 'celular'>) {
+  if (Boolean(dados.email) === Boolean(dados.celular)) throw new BadRequestException('Informe um e-mail ou celular.');
+  return dados.email ? { email: dados.email } : { celular: dados.celular! };
+}
 const dadosPedido = {
   cliente: { select: contaPublica },
   mensagens: { orderBy: { criadoEm: 'asc' } },
@@ -131,6 +140,54 @@ class Acesso {
     return { mensagem: 'Se o endereço puder ser cadastrado, você receberá um link para criar sua conta.' };
   }
 
+  @Post('auth/contas')
+  @UseGuards(LimitePorIp)
+  async cadastroDireto(@Body() dados: CadastroDiretoDto) {
+    const identificador = identificadorConta(dados);
+    const conflito = () => new ConflictException('Este identificador já está em uso. Entre na sua conta ou recupere o acesso.');
+    if (dados.email && dados.email === emailProprietario) throw conflito();
+    const codigo = novoCodigo();
+    const hash = await gerarHash(dados.senha);
+    try {
+      const sessao = await this.db.$transaction(async tx => {
+        const conta = await tx.conta.create({
+          data: { ...identificador, nome: dados.nome, papel: 'CLIENTE', hash, recuperacaoHash: resumirCodigo(codigo) },
+          select: contaAutenticada,
+        });
+        return this.sessao(conta, 0, false, tx);
+      });
+      return { ...sessao, codigo };
+    } catch (erro) {
+      if (erroUnico(erro)) throw conflito();
+      throw erro;
+    }
+  }
+
+  @Post('auth/recuperacao-codigo')
+  @HttpCode(200)
+  @UseGuards(LimitePorIp)
+  async recuperarPorCodigo(@Body() dados: RecuperacaoCodigoDto, @Res({ passthrough: true }) res: RespostaComCabecalho) {
+    const identificador = identificadorConta(dados);
+    this.limites.consumir('recuperacao-codigo:' + (dados.email ?? dados.celular), 8, res);
+    const recuperacaoHash = resumirCodigo(dados.codigo);
+    const invalido = () => new UnauthorizedException('Identificador ou código de recuperação inválido.');
+    const conta = await this.db.conta.findFirst({
+      where: { ...identificador, recuperacaoHash, papel: 'CLIENTE' },
+      select: { id: true, versaoSessao: true },
+    });
+    if (!conta) throw invalido();
+    const codigo = novoCodigo();
+    const hash = await gerarHash(dados.senha);
+    await this.db.$transaction(async tx => {
+      const where = { id: conta.id, recuperacaoHash, versaoSessao: conta.versaoSessao };
+      const data = { hash, recuperacaoHash: resumirCodigo(codigo), versaoSessao: { increment: 1 } };
+      if (!(await tx.conta.updateMany({ where, data })).count) throw invalido();
+      await tx.sessaoAcesso.deleteMany({ where: { contaId: conta.id } });
+      await tx.tokenEmail.deleteMany({ where: { contaId: conta.id } });
+    });
+    return { codigo };
+  }
+
   @Post('auth/confirmar-email')
   @UseGuards(LimitePorIp)
   async confirmarEmail(@Body() dados: SenhaEmailDto) {
@@ -140,8 +197,8 @@ class Acesso {
         this.email.exigirConfirmacaoPermitida(registro.email);
         if (registro.email === emailProprietario) throw new ConflictException('Este link já não pode ser usado.');
         return tx.conta.create({
-          data: { email: registro.email, nome: registro.nome!, hash: await gerarHash(dados.senha), papel: 'CLIENTE' },
-          select: contaPublica,
+          data: { email: registro.email, emailVerificado: true, nome: registro.nome!, hash: await gerarHash(dados.senha), papel: 'CLIENTE' },
+          select: contaAutenticada,
         });
       });
       return this.sessao(conta, 0);
@@ -154,17 +211,16 @@ class Acesso {
   @Post('auth/login')
   @UseGuards(LimitePorIp)
   async login(@Body() dados: LoginDto, @Res({ passthrough: true }) res: RespostaComCabecalho) {
-    const identificador = dados.email || dados.celular;
-    if (!identificador || (dados.email && dados.celular)) throw new BadRequestException('Informe um e-mail ou celular.');
-    this.limites.consumir('login-identificador:' + identificador, 8, res);
-    const conta = await this.db.conta.findUnique({ where: dados.email ? { email: dados.email } : { celular: dados.celular } });
+    const identificador = identificadorConta(dados);
+    this.limites.consumir('login-identificador:' + (dados.email ?? dados.celular), 8, res);
+    const conta = await this.db.conta.findUnique({ where: identificador });
     const valida = await verificarSenha(dados.senha, conta?.hash ?? hashReserva);
     if (!conta || !valida) throw new UnauthorizedException('Dados de acesso incorretos.');
-    const { id, nome, celular, email, papel } = conta;
+    const { id, nome, celular, email, papel, emailVerificado } = conta;
     if (hashLegado(conta.hash)) {
       await this.db.conta.updateMany({ where: { id, hash: conta.hash }, data: { hash: await gerarHash(dados.senha) } });
     }
-    return this.sessao({ id, nome, celular, email, papel }, conta.versaoSessao, conta.trocarSenha);
+    return this.sessao({ id, nome, celular, email, papel, emailVerificado }, conta.versaoSessao, conta.trocarSenha);
   }
 
   @Post('auth/vincular-email')
@@ -190,10 +246,10 @@ class Acesso {
         const registro = await this.email.consumir(tx, dados.token, 'VINCULO', usuario.sub);
         if (registro.email === emailProprietario) throw new ConflictException('Este e-mail está reservado.');
         const where = { id: usuario.sub, email: null, versaoSessao: registro.versao! };
-        if (!(await tx.conta.updateMany({ where, data: { email: registro.email } })).count) {
+        if (!(await tx.conta.updateMany({ where, data: { email: registro.email, emailVerificado: true } })).count) {
           throw new ConflictException('Esta conta já tem um e-mail vinculado ou o link venceu.');
         }
-        return tx.conta.findUniqueOrThrow({ where: { id: usuario.sub }, select: contaPublica });
+        return tx.conta.findUniqueOrThrow({ where: { id: usuario.sub }, select: contaAutenticada });
       });
       return { conta };
     } catch (erro) {
@@ -209,7 +265,7 @@ class Acesso {
     this.email.exigirDisponibilidade();
     this.limites.consumir('recuperacao-email:' + dados.email, 5, res);
     const conta = await this.db.conta.findUnique({ where: { email: dados.email } });
-    if (conta && !conta.trocarSenha) {
+    if (conta?.emailVerificado && !conta.trocarSenha) {
       await this.email.enviar({ finalidade: 'RECUPERACAO', email: dados.email, contaId: conta.id, versao: conta.versaoSessao })
         .catch(() => console.warn('Não foi possível enviar um e-mail de recuperação.'));
     }
@@ -222,7 +278,7 @@ class Acesso {
   async redefinirSenha(@Body() dados: SenhaEmailDto) {
     await this.db.$transaction(async tx => {
       const registro = await this.email.consumir(tx, dados.token, 'RECUPERACAO');
-      const where = { id: registro.contaId!, email: registro.email, versaoSessao: registro.versao!, trocarSenha: false };
+      const where = { id: registro.contaId!, email: registro.email, emailVerificado: true, versaoSessao: registro.versao!, trocarSenha: false };
       const resultado = await tx.conta.updateMany({
         where, data: { hash: await gerarHash(dados.senha), versaoSessao: { increment: 1 } },
       });
@@ -247,7 +303,7 @@ class Acesso {
             id: proprietario, papel: 'ENGENHEIRO', versaoSessao: registro.versao!,
             OR: [{ email: null }, { email: registro.email }],
           },
-          data: { email: registro.email, hash: await gerarHash(dados.senha), versaoSessao: { increment: 1 } },
+          data: { email: registro.email, emailVerificado: true, hash: await gerarHash(dados.senha), versaoSessao: { increment: 1 } },
         });
         if (!resultado.count) throw new BadRequestException('Convite inválido ou vencido.');
         await tx.sessaoAcesso.deleteMany({ where: { contaId: proprietario } });
@@ -309,13 +365,14 @@ class Acesso {
     });
   }
 
-  private async sessao(conta: { id: string; nome: string; celular: string | null; email: string | null; papel: Papel }, ver: number, trocarSenha = false) {
+  private async sessao(conta: { id: string; nome: string; celular: string | null; email: string | null; papel: Papel; emailVerificado: boolean }, ver: number, trocarSenha = false, tx?: Prisma.TransactionClient) {
     const agora = new Date();
     const expiraEm = new Date(agora.getTime() + duracaoSessao * 1000);
-    const [, { id }] = await this.db.$transaction([
+    const criar = (db: Prisma.TransactionClient) => db.sessaoAcesso.create({ data: { contaId: conta.id, expiraEm }, select: { id: true } });
+    const { id } = tx ? await criar(tx) : (await this.db.$transaction([
       this.db.sessaoAcesso.deleteMany({ where: { expiraEm: { lte: agora } } }),
-      this.db.sessaoAcesso.create({ data: { contaId: conta.id, expiraEm }, select: { id: true } }),
-    ]);
+      criar(this.db),
+    ]))[1];
     return { conta: { ...conta, profissional: ehProprietario(conta.id, conta.papel), ...(trocarSenha && { trocarSenha }) }, expiraEm, token: await this.jwt.signAsync({ sub: conta.id, jti: id, ver }) };
   }
 }

@@ -59,6 +59,13 @@ test('migração preserva dados e o convite libera somente o titular', {timeout:
     VALUES (${pedido},${cliente},'Topografia','Mossoró','Referência fictícia','Pedido registrado antes da migração','MARCADO')`;
   await db.$executeRaw`INSERT INTO "Visita" (id,"pedidoId",horario) VALUES (${visita},${pedido},${horario})`;
 
+  for (const nome of ['20261124030000_contas_por_email', '20261125000000_senha_inicial']) {
+    cpSync(join(migracoes, nome), join(anterior, 'migrations', nome), {recursive:true});
+  }
+  migrar(join(anterior, 'schema.prisma'));
+  const emailCliente = 'cliente-anterior@example.test';
+  await db.$executeRaw`UPDATE "Conta" SET email=${emailCliente} WHERE id=${cliente}`;
+
   migrar('prisma/schema.prisma');
   const caixa = await iniciarApi(t, env);
   const req = requisicoes(caixa.base);
@@ -69,6 +76,8 @@ test('migração preserva dados e o convite libera somente o titular', {timeout:
   const sessaoAdmin = await entrar('84900000004');
   assert.equal(sessaoDono.conta.id, dono);
   assert.equal(sessaoDono.conta.profissional, true);
+  assert.equal(sessaoCliente.conta.emailVerificado, true);
+  assert.equal((await req('/auth/login', {body:{email:emailCliente,senha}})).conta.id, cliente);
   const preservado = await req('/pedidos/' + pedido, {token:sessaoCliente.token});
   assert.equal(preservado.clienteId, cliente);
   assert.equal(preservado.visita.id, visita);
