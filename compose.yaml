@@ -20,6 +20,8 @@ services:
     environment:
       DATABASE_URL: postgresql://agenda:${POSTGRES_PASSWORD}@db:5432/agenda
       JWT_SECRET: ${JWT_SECRET:?Configure JWT_SECRET em .env}
+      COGNITO_USER_POOL_ID: ${COGNITO_USER_POOL_ID:-}
+      COGNITO_CLIENT_ID: ${COGNITO_CLIENT_ID:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
       AGENDA_OWNER_ID: ${AGENDA_OWNER_ID:-}
       AGENDA_OWNER_EMAIL: ${AGENDA_OWNER_EMAIL:-}

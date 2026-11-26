@@ -11,6 +11,7 @@ import { JwtModule, JwtService } from '@nestjs/jwt';
 import { Papel, Prisma, Situacao } from '@prisma/client';
 import helmet from 'helmet';
 import { Db } from './db';
+import { Cognito } from './cognito';
 import { Email } from './email';
 import { CadastroDiretoDto, CadastroDto, EmailDto, FiltrosDto, LoginDto, MensagemDto, PedidoDto, PerfilProfissionalDto, RecuperacaoCodigoDto, SenhaEmailDto, TokenEmailDto, TrocaSenhaDto, RemarcacaoDto, VisitaDto } from './dto';
 import { gerarHash, hashLegado, hashReserva, verificarSenha } from './senha';
@@ -19,6 +20,7 @@ import { LimiteAcesso, type RespostaComCabecalho } from './limite-acesso';
 type Sessao = { sub: string; papel: Papel; id: string; ver: number; profissionalAutorizado: boolean };
 const PermitirSenhaInicial = () => SetMetadata('permitirSenhaInicial', true);
 type TokenSessao = { sub: string; jti: string; ver: number };
+type ContaSessao = { id: string; nome: string; celular: string | null; email: string | null; papel: Papel; emailVerificado: boolean; trocarSenha?: boolean };
 const Usuario = createParamDecorator((_, contexto: ExecutionContext) =>
   contexto.switchToHttp().getRequest().usuario as Sessao);
 const contaPublica = { id: true, nome: true, celular: true, email: true, papel: true };
@@ -67,27 +69,31 @@ const duracaoSessao = 8 * 60 * 60;
 
 @Injectable()
 class Autenticacao implements CanActivate {
-  constructor(private jwt: JwtService, private db: Db, private reflector: Reflector) {}
+  constructor(private jwt: JwtService, private db: Db, private reflector: Reflector, private cognito: Cognito) {}
 
   async canActivate(contexto: ExecutionContext) {
     const req = contexto.switchToHttp().getRequest();
     const token = req.headers.authorization?.match(/^Bearer (\S+)$/i)?.[1];
     if (!token) throw new UnauthorizedException('Entre na sua conta.');
     const invalida = () => new UnauthorizedException('Sua sessão terminou. Entre novamente.');
-    const dados = await this.jwt.verifyAsync<TokenSessao>(token).catch(() => { throw invalida(); });
-    if (typeof dados.jti !== 'string' || typeof dados.sub !== 'string' || !Number.isInteger(dados.ver)) throw invalida();
+    const remoto = this.cognito.ativo ? await this.cognito.verificar(token).catch(() => { throw invalida(); }) : null;
+    const local = remoto ? null : await this.jwt.verifyAsync<TokenSessao>(token).catch(() => { throw invalida(); });
+    if (local && (typeof local.jti !== 'string' || typeof local.sub !== 'string' || !Number.isInteger(local.ver))) throw invalida();
+    const id = remoto ? resumirCodigo(token) : local!.jti;
     const sessao = await this.db.sessaoAcesso.findUnique({
-      where: { id: dados.jti },
+      where: { id },
       select: { contaId: true, expiraEm: true, conta: { select: {
-        papel: true, versaoSessao: true, trocarSenha: true,
+        papel: true, versaoSessao: true, trocarSenha: true, cognitoSub: true, cognitoUsuario: true,
       } } },
     });
-    if (!sessao || sessao.contaId !== dados.sub || sessao.expiraEm <= new Date() || sessao.conta.versaoSessao !== dados.ver) throw invalida();
+    if (!sessao || sessao.expiraEm <= new Date()) throw invalida();
+    if (remoto && (sessao.conta.cognitoSub !== remoto.sub || sessao.conta.cognitoUsuario !== remoto.username)) throw invalida();
+    if (local && (sessao.contaId !== local.sub || sessao.conta.versaoSessao !== local.ver)) throw invalida();
     if (sessao.conta.trocarSenha && !this.reflector.get('permitirSenhaInicial', contexto.getHandler())) {
       throw new ForbiddenException('Troque a senha inicial para continuar.');
     }
     const usuario: Sessao = {
-      id: dados.jti, sub: sessao.contaId, papel: sessao.conta.papel, ver: dados.ver,
+      id, sub: sessao.contaId, papel: sessao.conta.papel, ver: sessao.conta.versaoSessao,
       profissionalAutorizado: ehProprietario(sessao.contaId, sessao.conta.papel),
     };
     req.usuario = usuario;
@@ -110,7 +116,7 @@ class LimitePorIp implements CanActivate {
 
 @Controller()
 class Acesso {
-  constructor(private db: Db, private jwt: JwtService, private limites: LimiteAcesso, private email: Email) {}
+  constructor(private db: Db, private jwt: JwtService, private limites: LimiteAcesso, private email: Email, private cognito: Cognito) {}
 
   @Get('saude')
   async saude() {
@@ -154,8 +160,8 @@ class Acesso {
           data: { ...identificador, nome: dados.nome, papel: 'CLIENTE', hash, recuperacaoHash: resumirCodigo(codigo) },
           select: contaAutenticada,
         });
-        return this.sessao(conta, 0, false, tx);
-      });
+        return this.iniciarSessao(conta, dados.senha, tx);
+      }, { timeout: 30_000 });
       return { ...sessao, codigo };
     } catch (erro) {
       if (erroUnico(erro)) throw conflito();
@@ -178,13 +184,15 @@ class Acesso {
     if (!conta) throw invalido();
     const codigo = novoCodigo();
     const hash = await gerarHash(dados.senha);
-    await this.db.$transaction(async tx => {
+    const anterior = await this.db.$transaction(async tx => {
       const where = { id: conta.id, recuperacaoHash, versaoSessao: conta.versaoSessao };
       const data = { hash, recuperacaoHash: resumirCodigo(codigo), versaoSessao: { increment: 1 } };
       if (!(await tx.conta.updateMany({ where, data })).count) throw invalido();
       await tx.sessaoAcesso.deleteMany({ where: { contaId: conta.id } });
       await tx.tokenEmail.deleteMany({ where: { contaId: conta.id } });
-    });
+      return this.atualizarIdentidade(tx, conta.id, dados.senha);
+    }, { timeout: 30_000 });
+    if (anterior) await this.cognito.remover(anterior);
     return { codigo };
   }
 
@@ -196,12 +204,13 @@ class Acesso {
         const registro = await this.email.consumir(tx, dados.token, 'CADASTRO');
         this.email.exigirConfirmacaoPermitida(registro.email);
         if (registro.email === emailProprietario) throw new ConflictException('Este link já não pode ser usado.');
-        return tx.conta.create({
+        const conta = await tx.conta.create({
           data: { email: registro.email, emailVerificado: true, nome: registro.nome!, hash: await gerarHash(dados.senha), papel: 'CLIENTE' },
           select: contaAutenticada,
         });
-      });
-      return this.sessao(conta, 0);
+        return this.iniciarSessao(conta, dados.senha, tx);
+      }, { timeout: 30_000 });
+      return conta;
     } catch (erro) {
       if (erroUnico(erro)) throw new ConflictException('Este link já não pode ser usado. Entre na sua conta.');
       throw erro;
@@ -214,9 +223,20 @@ class Acesso {
     const identificador = identificadorConta(dados);
     this.limites.consumir('login-identificador:' + (dados.email ?? dados.celular), 8, res);
     const conta = await this.db.conta.findUnique({ where: identificador });
+    if (this.cognito.ativo && conta?.cognitoUsuario) return this.sessaoCognito(conta, conta.cognitoUsuario, conta.cognitoSub!, dados.senha);
     const valida = await verificarSenha(dados.senha, conta?.hash ?? hashReserva);
     if (!conta || !valida) throw new UnauthorizedException('Dados de acesso incorretos.');
     const { id, nome, celular, email, papel, emailVerificado } = conta;
+    if (this.cognito.ativo) {
+      return this.db.$transaction(async tx => {
+        const bloqueio = await tx.conta.updateMany({
+          where: { id, hash: conta.hash, versaoSessao: conta.versaoSessao, cognitoSub: null },
+          data: { hash: hashLegado(conta.hash) ? await gerarHash(dados.senha) : conta.hash },
+        });
+        if (!bloqueio.count) throw new ConflictException('A conta foi atualizada. Entre novamente.');
+        return this.iniciarSessao({ id, nome, celular, email, papel, emailVerificado, trocarSenha: conta.trocarSenha }, dados.senha, tx);
+      }, { timeout: 30_000 });
+    }
     if (hashLegado(conta.hash)) {
       await this.db.conta.updateMany({ where: { id, hash: conta.hash }, data: { hash: await gerarHash(dados.senha) } });
     }
@@ -276,7 +296,7 @@ class Acesso {
   @HttpCode(204)
   @UseGuards(LimitePorIp)
   async redefinirSenha(@Body() dados: SenhaEmailDto) {
-    await this.db.$transaction(async tx => {
+    const anterior = await this.db.$transaction(async tx => {
       const registro = await this.email.consumir(tx, dados.token, 'RECUPERACAO');
       const where = { id: registro.contaId!, email: registro.email, emailVerificado: true, versaoSessao: registro.versao!, trocarSenha: false };
       const resultado = await tx.conta.updateMany({
@@ -284,7 +304,9 @@ class Acesso {
       });
       if (!resultado.count) throw new BadRequestException('Link inválido ou vencido. Solicite um novo e-mail.');
       await tx.sessaoAcesso.deleteMany({ where: { contaId: registro.contaId! } });
-    });
+      return this.atualizarIdentidade(tx, registro.contaId!, dados.senha);
+    }, { timeout: 30_000 });
+    if (anterior) await this.cognito.remover(anterior);
   }
 
   @Post('auth/ativar-profissional')
@@ -293,7 +315,7 @@ class Acesso {
   async ativarProfissional(@Body() dados: SenhaEmailDto) {
     if (!proprietario) throw new ForbiddenException('Área profissional indisponível.');
     try {
-      await this.db.$transaction(async tx => {
+      const anterior = await this.db.$transaction(async tx => {
         const registro = await this.email.consumir(tx, dados.token, 'PROPRIETARIO', proprietario);
         if (emailProprietario && registro.email !== emailProprietario) {
           throw new BadRequestException('Convite inválido ou vencido.');
@@ -307,7 +329,9 @@ class Acesso {
         });
         if (!resultado.count) throw new BadRequestException('Convite inválido ou vencido.');
         await tx.sessaoAcesso.deleteMany({ where: { contaId: proprietario } });
-      });
+        return this.atualizarIdentidade(tx, proprietario, dados.senha);
+      }, { timeout: 30_000 });
+      if (anterior) await this.cognito.remover(anterior);
     } catch (erro) {
       if (erroUnico(erro)) throw new ConflictException('Este e-mail já pertence a outra conta.');
       throw erro;
@@ -352,17 +376,50 @@ class Acesso {
     exigirProfissional(usuario);
     const conta = await this.db.conta.findUniqueOrThrow({ where: { id: usuario.sub } });
     if (conta.versaoSessao !== usuario.ver) throw new UnauthorizedException('Sua sessão terminou. Entre novamente.');
-    if (!await verificarSenha(dados.senhaAtual, conta.hash)) throw new BadRequestException('Senha atual incorreta.');
+    if (this.cognito.ativo && conta.cognitoUsuario) {
+      await this.cognito.autenticar(conta.cognitoUsuario, dados.senhaAtual).catch(erro => {
+        if (erro instanceof UnauthorizedException) throw new BadRequestException('Senha atual incorreta.');
+        throw erro;
+      });
+    } else if (!await verificarSenha(dados.senhaAtual, conta.hash)) throw new BadRequestException('Senha atual incorreta.');
     if (dados.senha === dados.senhaAtual) throw new BadRequestException('Escolha uma senha diferente da atual.');
     const hash = await gerarHash(dados.senha);
-    await this.db.$transaction(async tx => {
+    const anterior = await this.db.$transaction(async tx => {
       const alteradas = await tx.conta.updateMany({
         where: { id: usuario.sub, versaoSessao: usuario.ver, hash: conta.hash },
         data: { hash, trocarSenha: false, versaoSessao: { increment: 1 } },
       });
       if (!alteradas.count) throw new UnauthorizedException('Sua sessão terminou. Entre novamente.');
       await tx.sessaoAcesso.deleteMany({ where: { contaId: usuario.sub } });
-    });
+      return this.atualizarIdentidade(tx, usuario.sub, dados.senha);
+    }, { timeout: 30_000 });
+    if (anterior) await this.cognito.remover(anterior);
+  }
+
+  private async atualizarIdentidade(tx: Prisma.TransactionClient, id: string, senha: string) {
+    if (!this.cognito.ativo) return null;
+    const { cognitoUsuario } = await tx.conta.findUniqueOrThrow({ where: { id }, select: { cognitoUsuario: true } });
+    if (!cognitoUsuario) return null;
+    const identidade = await this.cognito.criar(senha);
+    await tx.conta.update({ where: { id }, data: identidade });
+    return cognitoUsuario;
+  }
+
+  private async iniciarSessao(conta: ContaSessao, senha: string, tx: Prisma.TransactionClient) {
+    if (!this.cognito.ativo) return this.sessao(conta, 0, conta.trocarSenha, tx);
+    const identidade = await this.cognito.criar(senha);
+    await tx.conta.update({ where: { id: conta.id }, data: identidade });
+    return this.sessaoCognito(conta, identidade.cognitoUsuario, identidade.cognitoSub, senha, tx);
+  }
+
+  private async sessaoCognito(conta: ContaSessao, usuario: string, sub: string, senha: string, db: Prisma.TransactionClient = this.db) {
+    const { token, claims } = await this.cognito.autenticar(usuario, senha);
+    if (claims.sub !== sub || claims.username !== usuario) throw new UnauthorizedException('Identidade inválida.');
+    const expiraEm = new Date(claims.exp * 1000);
+    if (db === this.db) await db.sessaoAcesso.deleteMany({ where: { expiraEm: { lte: new Date() } } });
+    await db.sessaoAcesso.create({ data: { id: resumirCodigo(token), contaId: conta.id, expiraEm } });
+    const { id, nome, celular, email, papel, emailVerificado, trocarSenha } = conta;
+    return { conta: { id, nome, celular, email, papel, emailVerificado, profissional: ehProprietario(id, papel), ...(trocarSenha && { trocarSenha }) }, expiraEm, token };
   }
 
   private async sessao(conta: { id: string; nome: string; celular: string | null; email: string | null; papel: Papel; emailVerificado: boolean }, ver: number, trocarSenha = false, tx?: Prisma.TransactionClient) {
@@ -565,7 +622,7 @@ class VisitasController {
     verifyOptions: { algorithms: ['HS256'], issuer: 'agenda-api', audience: 'agenda-web' },
   })],
   controllers: [Acesso, PedidosController, VisitasController, ProfissionaisController],
-  providers: [Db, Autenticacao, LimiteAcesso, LimitePorIp, PedidosService, Email],
+  providers: [Db, Autenticacao, LimiteAcesso, LimitePorIp, PedidosService, Email, Cognito],
 })
 class App {}
 
